@@ -215,7 +215,7 @@ def admin_dashboard():
     <h2>Courses</h2>
     {% for c in courses %}<article class="card" style="margin:12px 0">
       <h3>{{c.title}}</h3><p>{{c.category}} · {{c.level}} · {{c.lessons|length}} lessons · {{c.students|length}} enrolled</p>
-      <a href="/course/{{c.id}}">View course</a> · <a href="/admin/course/{{c.id}}/lesson/new">Add lesson</a>
+      <a href="/course/{{c.id}}">View course</a> · <a href="/admin/course/{{c.id}}/edit">Edit course</a> · <a href="/admin/course/{{c.id}}/lesson/new">Add lesson</a> · <a href="/admin/course/{{c.id}}/students">Manage enrolled students</a>
       <form method="post" action="/admin/course/{{c.id}}/delete" onsubmit="return confirm('Delete this course and its lessons?')"><button class="btn" style="background:#b91c1c;margin-top:10px">Delete course</button></form>
     </article>{% else %}<p>No courses yet.</p>{% endfor %}
     <h2>Registered learners</h2><div class="card"><ul>{% for u in users %}<li>{{u.name}} — {{u.email}} — {{u.courses|length}} enrolled</li>{% else %}<li>No learners registered.</li>{% endfor %}</ul></div>
@@ -248,6 +248,98 @@ def admin_new_course():
     <label>Description</label><textarea name="description" rows="5" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px"></textarea>
     <button class="btn">Save course</button> <a href="/admin">Cancel</a></form></div>
     """)
+
+@app.route("/admin/course/<int:cid>/edit", methods=["GET", "POST"])
+@login_required
+def admin_edit_course(cid):
+    denied = admin_required()
+    if denied: return denied
+    c=Course.query.get_or_404(cid)
+    if request.method == "POST":
+        title=request.form.get("title","").strip()
+        if not title:
+            flash("Course title is required.")
+        else:
+            c.title=title
+            c.category=request.form.get("category","ICT").strip() or "ICT"
+            c.level=request.form.get("level","Beginner").strip() or "Beginner"
+            c.description=request.form.get("description","").strip()
+            db.session.commit()
+            flash("Course details updated successfully.")
+            return redirect(url_for("admin_dashboard"))
+    return page("Edit course", """
+    <div class="card" style="max-width:720px;margin:auto"><h1>Edit course</h1>
+    <form method="post"><label>Course title</label><input name="title" required maxlength="160" value="{{c.title}}">
+    <label>Category</label><input name="category" value="{{c.category or 'ICT'}}">
+    <label>Level</label><input name="level" value="{{c.level or 'Beginner'}}">
+    <label>Description</label><textarea name="description" rows="6">{{c.description or ''}}</textarea>
+    <button class="btn">Save changes</button> <a href="/admin">Cancel</a></form></div>
+    """, c=c)
+
+@app.route("/admin/lesson/<int:lid>/edit", methods=["GET", "POST"])
+@login_required
+def admin_edit_lesson(lid):
+    denied = admin_required()
+    if denied: return denied
+    lesson_record=Lesson.query.get_or_404(lid)
+    if request.method == "POST":
+        title=request.form.get("title","").strip()
+        content=request.form.get("content","").strip()
+        if not title:
+            flash("Lesson title is required.")
+        else:
+            lesson_record.title=title
+            lesson_record.content=content
+            try:
+                lesson_record.position=max(1,int(request.form.get("position",lesson_record.position or 1)))
+            except (TypeError,ValueError):
+                flash("Lesson order must be a whole number.")
+                return redirect(url_for("admin_edit_lesson",lid=lid))
+            db.session.commit()
+            flash("Lesson content updated successfully.")
+            return redirect(url_for("admin_course_students",cid=lesson_record.course_id))
+    return page("Edit lesson", """
+    <div class="card" style="max-width:850px;margin:auto"><h1>Edit lesson content</h1>
+    <p class="muted">Course: {{lesson_record.course.title}}</p>
+    <form method="post"><label>Lesson title</label><input name="title" required maxlength="160" value="{{lesson_record.title}}">
+    <label>Lesson order</label><input name="position" type="number" min="1" value="{{lesson_record.position or 1}}">
+    <label>Learning content / notes / activities</label><textarea name="content" rows="20" style="min-height:380px">{{lesson_record.content or ''}}</textarea>
+    <button class="btn">Save lesson changes</button> <a href="/admin/course/{{lesson_record.course_id}}/students">Cancel</a></form></div>
+    """, lesson_record=lesson_record)
+
+@app.route("/admin/course/<int:cid>/students")
+@login_required
+def admin_course_students(cid):
+    denied = admin_required()
+    if denied: return denied
+    c=Course.query.get_or_404(cid)
+    return page("Course management", """
+    <h1>{{c.title}}</h1>
+    <p class="muted">Manage lesson content and students enrolled in this course.</p>
+    <p><a class="btn" href="/admin/course/{{c.id}}/edit">Edit course details</a> <a class="btn" href="/admin/course/{{c.id}}/lesson/new">Add lesson</a></p>
+    <h2>Lessons</h2>
+    {% for lesson in lessons %}<article class="card" style="margin:10px 0"><strong>{{lesson.position}}. {{lesson.title}}</strong><p class="muted">{{(lesson.content or '')[:180]}}{% if lesson.content and lesson.content|length > 180 %}…{% endif %}</p><a href="/admin/lesson/{{lesson.id}}/edit">Edit lesson content</a></article>{% else %}<p>No lessons added yet.</p>{% endfor %}
+    <h2>Enrolled students ({{c.students|length}})</h2>
+    <div class="card"><ul>{% for student in students %}<li style="margin:12px 0"><strong>{{student.name}}</strong> — {{student.email}}
+      <form method="post" action="/admin/course/{{c.id}}/students/{{student.id}}/remove" style="display:inline" onsubmit="return confirm('Remove this student from this course? Their account and other enrolments will remain.')"><button class="btn" style="background:#b91c1c;padding:8px 12px">Remove from course</button></form>
+    </li>{% else %}<li>No students are enrolled in this course.</li>{% endfor %}</ul></div>
+    <p><a href="/admin">← Back to Admin Dashboard</a></p>
+    """, c=c, lessons=Lesson.query.filter_by(course_id=c.id).order_by(Lesson.position,Lesson.id).all(), students=sorted(c.students,key=lambda student:student.name.lower()))
+
+@app.route("/admin/course/<int:cid>/students/<int:uid>/remove", methods=["POST"])
+@login_required
+def admin_remove_course_student(cid,uid):
+    denied = admin_required()
+    if denied: return denied
+    c=Course.query.get_or_404(cid)
+    student=User.query.get_or_404(uid)
+    if student in c.students:
+        c.students.remove(student)
+        db.session.commit()
+        flash(student.name + " was removed from " + c.title + ". Their account was not deleted.")
+    else:
+        flash("That student is not enrolled in this course.")
+    return redirect(url_for("admin_course_students",cid=cid))
 
 @app.route("/admin/course/<int:cid>/lesson/new", methods=["GET", "POST"])
 @login_required
