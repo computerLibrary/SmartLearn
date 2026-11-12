@@ -261,6 +261,17 @@ with app.app_context():
     connection.exec_driver_sql(
      "UPDATE user SET password_hash = '' WHERE password_hash IS NULL"
     )
+   # The legacy password column is no longer written by this application.
+   # Keep existing hashes, but allow new accounts to leave that old column empty.
+   if db.engine.dialect.name == "mysql" and "password" in existing_user_columns:
+    password_column = next(
+     column for column in inspect(db.engine).get_columns("user")
+     if column["name"] == "password"
+    )
+    if not password_column.get("nullable", True):
+     connection.exec_driver_sql(
+      "ALTER TABLE user MODIFY COLUMN password VARCHAR(255) NULL"
+     )
  if Course.query.count()==0:
   seeds=[("Computer Fundamentals","ICT","Understand computer hardware, software, data representation and basic computer operations.","Beginner"),("Google Docs","Productivity","Create, format, collaborate on and share professional documents.","Beginner"),("HTML and CSS","Web Design","Build structured web pages and style them using CSS.","Beginner"),("Database and SQL","Programming","Learn relational databases, tables, queries and SQL operations.","Intermediate"),("Python Programming","Programming","Develop programming skills using Python fundamentals.","Beginner"),("Computer Networking","Networking","Explore network devices, addressing, protocols and security basics.","Intermediate")]
   for title,cat,desc,level in seeds: db.session.add(Course(title=title,category=cat,description=desc,level=level))
