@@ -222,6 +222,29 @@ def lesson(lid):
 
 with app.app_context():
  db.create_all()
+ # Lightweight, non-destructive schema migration for existing installations.
+ # SQLAlchemy create_all() creates missing tables but does not add new columns.
+ from sqlalchemy import inspect
+ schema_updates = {
+  "course": {
+   "category": "VARCHAR(80) DEFAULT 'ICT'",
+   "description": "TEXT",
+   "level": "VARCHAR(40) DEFAULT 'Beginner'"
+  },
+  "lesson": {
+   "position": "INTEGER DEFAULT 1"
+  }
+ }
+ inspector = inspect(db.engine)
+ with db.engine.begin() as connection:
+  for table_name, columns in schema_updates.items():
+   if inspector.has_table(table_name):
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+    for column_name, column_sql in columns.items():
+     if column_name not in existing:
+      connection.exec_driver_sql(
+       f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"
+      )
  if Course.query.count()==0:
   seeds=[("Computer Fundamentals","ICT","Understand computer hardware, software, data representation and basic computer operations.","Beginner"),("Google Docs","Productivity","Create, format, collaborate on and share professional documents.","Beginner"),("HTML and CSS","Web Design","Build structured web pages and style them using CSS.","Beginner"),("Database and SQL","Programming","Learn relational databases, tables, queries and SQL operations.","Intermediate"),("Python Programming","Programming","Develop programming skills using Python fundamentals.","Beginner"),("Computer Networking","Networking","Explore network devices, addressing, protocols and security basics.","Intermediate")]
   for title,cat,desc,level in seeds: db.session.add(Course(title=title,category=cat,description=desc,level=level))
