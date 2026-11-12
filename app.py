@@ -183,7 +183,7 @@ def login():
   u=User.query.filter_by(email=login_value).first()
   if u and u.check_password(request.form.get("password","")): login_user(u); return redirect(url_for("dashboard"))
   flash("Student ID/email or password is incorrect.")
- return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address or Student Login ID</label><input name="login" required placeholder="Enter email or e.g. SL-A1B2C3D4"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
+ return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address</label><input name="login" type="email" required placeholder="Enter your email address"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
 
 @app.route("/logout", methods=["GET", "POST"])
 @login_required
