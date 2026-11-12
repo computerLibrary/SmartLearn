@@ -1,4 +1,5 @@
 import os
+import secrets
 from flask import Flask, request, redirect, url_for, flash, render_template_string, abort, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -33,6 +34,7 @@ class Course(db.Model):
  category=db.Column(db.String(80),default="ICT")
  description=db.Column(db.Text,default="")
  level=db.Column(db.String(40),default="Beginner")
+ enrollment_key=db.Column(db.String(32),unique=True,nullable=True)
  lessons=db.relationship("Lesson",backref="course",cascade="all, delete-orphan")
 
 class Lesson(db.Model):
@@ -167,6 +169,10 @@ def enrol(cid):
     if c in current_user.courses:
         flash("You are already enrolled in this course.")
     else:
+        submitted_key = request.form.get("enrollment_key", "").strip().upper()
+        if not c.enrollment_key or submitted_key != c.enrollment_key.upper():
+            flash("The enrollment key is incorrect. Please check with your teacher or administrator.")
+            return redirect(url_for("course", cid=cid))
         current_user.courses.append(c)
         db.session.commit()
         flash("You have successfully enrolled in " + c.title + ".")
@@ -176,7 +182,7 @@ def enrol(cid):
 @app.route("/course/<int:cid>")
 def course(cid):
  c=Course.query.get_or_404(cid)
- return page(c.title,'''<article class="card"><img class="course-detail-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}"><p class="muted">{{c.category}} · {{c.level}}</p><h1>{{c.title}}</h1><p>{{c.description}}</p>{% if current_user.is_authenticated %}<form method="post" action="/enrol/{{c.id}}"><button class="btn">Enrol in this course</button></form>{% else %}<a class="btn" href="/login">Sign in to enrol</a>{% endif %}<h2>Lessons</h2>{% for l in c.lessons|sort(attribute='position') %}<p><a href="/lesson/{{l.id}}">{{l.position}}. {{l.title}}</a></p>{% else %}<p>Lessons will be added soon.</p>{% endfor %}</article>''',c=c,image_for_course=course_image_url)
+ return page(c.title,'''<article class="card"><img class="course-detail-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}"><p class="muted">{{c.category}} · {{c.level}}</p><h1>{{c.title}}</h1><p>{{c.description}}</p>{% if current_user.is_authenticated %}{% if c in current_user.courses %}<p class="notice">You are already enrolled in this course.</p>{% else %}<form method="post" action="/enrol/{{c.id}}"><label>Course enrollment key</label><input name="enrollment_key" required maxlength="32" placeholder="Enter the key provided by your teacher"><button class="btn">Enrol in this course</button></form>{% endif %}{% else %}<a class="btn" href="/login">Sign in to enrol</a>{% endif %}<h2>Lessons</h2>{% for l in c.lessons|sort(attribute='position') %}<p><a href="/lesson/{{l.id}}">{{l.position}}. {{l.title}}</a></p>{% else %}<p>Lessons will be added soon.</p>{% endfor %}</article>''',c=c,image_for_course=course_image_url)
 
 @app.route("/register",methods=["GET","POST"])
 def register():
@@ -258,7 +264,7 @@ def admin_new_course():
         if not title:
             flash("Course title is required.")
         else:
-            db.session.add(Course(title=title,category=category,level=level,description=description))
+            db.session.add(Course(title=title,category=category,level=level,description=description,enrollment_key=secrets.token_hex(4).upper()))
             db.session.commit()
             flash("Course created successfully.")
             return redirect(url_for("admin_dashboard"))
@@ -277,6 +283,9 @@ def admin_edit_course(cid):
     denied = admin_required()
     if denied: return denied
     c=Course.query.get_or_404(cid)
+    if not c.enrollment_key:
+        c.enrollment_key = secrets.token_hex(4).upper()
+        db.session.commit()
     if request.method == "POST":
         title=request.form.get("title","").strip()
         if not title:
@@ -295,8 +304,22 @@ def admin_edit_course(cid):
     <label>Category</label><input name="category" value="{{c.category or 'ICT'}}">
     <label>Level</label><input name="level" value="{{c.level or 'Beginner'}}">
     <label>Description</label><textarea name="description" rows="6">{{c.description or ''}}</textarea>
-    <button class="btn">Save changes</button> <a href="/admin">Cancel</a></form></div>
+    <label>Course enrollment key</label><input value="{{c.enrollment_key or 'Key will be generated automatically'}}" readonly>
+     <button class="btn">Save changes</button> <a href="/admin">Cancel</a></form>
+     <form method="post" action="/admin/course/{{c.id}}/key/regenerate" onsubmit="return confirm('Generate a new key? The old key will stop working.')"><button class="btn" style="background:#b45309">Generate new enrollment key</button></form></div>
     """, c=c)
+
+@app.route("/admin/course/<int:cid>/key/regenerate", methods=["POST"])
+@login_required
+def admin_regenerate_course_key(cid):
+    denied = admin_required()
+    if denied: return denied
+    c = Course.query.get_or_404(cid)
+    c.enrollment_key = secrets.token_hex(4).upper()
+    db.session.commit()
+    flash("A new enrollment key has been generated for " + c.title + ". The previous key no longer works.")
+    return redirect(url_for("admin_edit_course", cid=cid))
+
 
 @app.route("/admin/lesson/<int:lid>/edit", methods=["GET", "POST"])
 @login_required
@@ -423,7 +446,8 @@ with app.app_context():
   "course": {
    "category": "VARCHAR(80) DEFAULT 'ICT'",
    "description": "TEXT",
-   "level": "VARCHAR(40) DEFAULT 'Beginner'"
+   "level": "VARCHAR(40) DEFAULT 'Beginner'",
+   "enrollment_key": "VARCHAR(32) NULL"
   },
   "lesson": {
    "position": "INTEGER DEFAULT 1"
