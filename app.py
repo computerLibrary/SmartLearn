@@ -56,6 +56,12 @@ h1{font-size:34px;margin-top:0}.muted{color:#64748b}.grid{display:grid;grid-temp
 .card{background:white;padding:22px;border-radius:14px;box-shadow:0 4px 18px #102a4310}.btn{display:inline-block;background:#0f766e;color:white;padding:11px 17px;border:0;border-radius:8px;text-decoration:none;cursor:pointer}
 input{width:100%;padding:12px;margin:7px 0 16px;border:1px solid #cbd5e1;border-radius:8px}label{font-weight:bold}textarea{font:inherit}
 .notice{padding:12px;background:#dcfce7;border-radius:8px;margin:12px 0}footer{text-align:center;color:#64748b;padding:35px}
+.home-hero{background:linear-gradient(90deg,rgba(8,35,55,.92),rgba(8,35,55,.42)),url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1800&q=85") center/cover no-repeat;min-height:340px;display:flex;align-items:center}
+.visual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px;margin:22px 0 34px}
+.visual-card{background:white;border-radius:14px;overflow:hidden;box-shadow:0 4px 18px #102a4310}
+.visual-card img{display:block;width:100%;height:155px;object-fit:cover}
+.visual-card div{padding:16px}.visual-card h3{margin:0 0 8px}.visual-card p{margin:0;color:#64748b;line-height:1.5}
+@media(max-width:600px){.home-hero{min-height:300px;padding:28px}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
 {% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day</footer></body></html>"""
@@ -64,7 +70,17 @@ def page(title,body,**ctx): return render_template_string(BASE,title=title,body=
 @app.route("/")
 def home():
  cs=Course.query.order_by(Course.id).limit(6).all()
- return page("Home",'''<section class="hero"><h1>Learn without limits.</h1><p>Build practical skills with accessible online courses.</p><a class="btn" href="/courses">Explore courses</a></section><h2>Popular courses</h2><div class="grid">{% for c in cs %}<article class="card"><p class="muted">{{c.category}} · {{c.level}}</p><h3>{{c.title}}</h3><p>{{c.description}}</p><a href="/course/{{c.id}}">View course →</a></article>{% else %}<p>Courses are being prepared.</p>{% endfor %}</div>''',cs=cs)
+ return page("Home","""
+ <section class="hero home-hero"><div><p style="text-transform:uppercase;letter-spacing:2px;font-weight:bold">Welcome to SmartLearn</p><h1>Learn today. Build tomorrow.</h1><p style="max-width:600px;line-height:1.7">Develop practical digital skills in computing, programming, web design, databases and emerging technologies.</p><a class="btn" href="/courses">Explore courses</a></div></section>
+ <h2>Explore learning areas</h2>
+ <div class="visual-grid">
+  <article class="visual-card"><img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80" alt="Learner working on a laptop" loading="lazy"><div><h3>Digital skills</h3><p>Build confidence using essential digital tools and technology.</p></div></article>
+  <article class="visual-card"><img src="https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=900&q=80" alt="Team collaborating at computers" loading="lazy"><div><h3>Programming</h3><p>Learn problem-solving, algorithms and software development.</p></div></article>
+  <article class="visual-card"><img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=900&q=80" alt="Web development workspace with code on a screen" loading="lazy"><div><h3>Web development</h3><p>Create websites and learn how frontend and backend systems work.</p></div></article>
+  <article class="visual-card"><img src="https://images.unsplash.com/photo-1555949963-ff9fe0c870eb?auto=format&fit=crop&w=900&q=80" alt="Computer programming code on a monitor" loading="lazy"><div><h3>Data and AI</h3><p>Explore databases, data analysis and artificial intelligence.</p></div></article>
+ </div>
+ <h2>Popular courses</h2><div class="grid">{% for c in cs %}<article class="card"><p class="muted">{{c.category}} · {{c.level}}</p><h3>{{c.title}}</h3><p>{{c.description}}</p><a href="/course/{{c.id}}">View course →</a></article>{% else %}<p>Courses are being prepared.</p>{% endfor %}</div>
+ """,cs=cs)
 
 @app.route("/health")
 def health(): return {"status":"ok","app":"SmartLearn"}
