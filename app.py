@@ -185,6 +185,13 @@ def login():
   flash("Student ID/email or password is incorrect.")
  return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address or Student Login ID</label><input name="login" required placeholder="Enter email or e.g. SL-A1B2C3D4"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
 
+@app.route("/logout", methods=["GET", "POST"])
+@login_required
+def logout():
+    logout_user()
+    flash("You have been signed out successfully.")
+    return redirect(url_for("login"))
+
 
 def admin_required():
     if not current_user.is_authenticated:
