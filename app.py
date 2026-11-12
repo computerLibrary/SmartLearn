@@ -103,12 +103,40 @@ footer{border-top:1px solid var(--sl-border);background:#fff;text-align:center;c
 article.card h2:first-child,article.card h3:first-child{margin-top:0}
 .lesson-content{font-family:'Bookman Old Style',Bookman,'URW Bookman',Georgia,serif;font-size:17px;line-height:1.85;letter-spacing:.05px;color:#263449}
 .lesson-content h1,.lesson-content h2,.lesson-content h3{font-family:'Bookman Old Style',Bookman,'URW Bookman',Georgia,serif;letter-spacing:0}
+.home-hero{min-height:360px;background-size:cover;background-position:center 42%;background-repeat:no-repeat}
+.course-image{display:block;width:100%;height:190px;object-fit:cover;border-radius:12px;margin:0 0 17px}
+.course-detail-image{width:100%;height:260px;object-fit:cover;border-radius:14px;margin:8px 0 20px}
+@media(max-width:700px){.home-hero{min-height:310px;background-position:center center}.course-image{height:165px}.course-detail-image{height:190px}}
 @media(max-width:700px){nav{gap:13px;padding:13px 18px}nav a{font-size:14px}.brand{font-size:22px}main{margin:26px auto 38px;padding:0 16px}.home-hero{min-height:330px;padding:28px 22px}.card{padding:20px}.visual-card img{height:155px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
 {% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day<br><span style="font-size:14px">Developed by <strong>Isaac NKURUNZIZA</strong></span></footer></body></html>"""
 def page(title,body,**ctx): return render_template_string(BASE,title=title,body=render_template_string(body,**ctx),**ctx)
+
+def course_image_url(title):
+    """Return a relevant course thumbnail for each SmartLearn subject."""
+    t = (title or "").lower()
+    choices = [
+        (("digital logic",), "photo-1518770660439-4636190af475"),
+        (("programming algorithms",), "photo-1515879218367-8466d910aaa4"),
+        (("python programming",), "photo-1526379095098-d400fd0bf935"),
+        (("html", "web development"), "photo-1498050108023-c5249f4df085"),
+        (("css",), "photo-1467232004584-a241de8bcf5d"),
+        (("database design", "database queries"), "photo-1544383835-bda2bc66a55d"),
+        (("google docs",), "photo-1455390582262-044c"),
+        (("google sheets",), "photo-1551288049-bebda4e38f71"),
+        (("machine learning",), "photo-1555255707-c07966088b7b"),
+        (("web database connectivity",), "photo-1519389950473-47ba0277781c"),
+        (("computer networking",), "photo-1558494949-ef010cbdcc31"),
+        (("artificial neural networks",), "photo-1677442136019-21780ecad995"),
+    ]
+    photo = "photo-1516321318423-f06f85e504b3"
+    for keywords, candidate in choices:
+        if any(word in t for word in keywords):
+            photo = candidate
+            break
+    return "https://images.unsplash.com/" + photo + "?auto=format&fit=crop&w=1000&q=80"
 
 @app.route("/")
 def home():
@@ -122,8 +150,8 @@ def home():
   <article class="visual-card"><img src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=900&q=80" alt="Web development workspace with code on a screen" loading="lazy"><div><h3>Web development</h3><p>Create websites and learn how frontend and backend systems work.</p></div></article>
   <article class="visual-card"><img src="https://images.unsplash.com/photo-1555949963-ff9fe0c870eb?auto=format&fit=crop&w=900&q=80" alt="Computer programming code on a monitor" loading="lazy"><div><h3>Data and AI</h3><p>Explore databases, data analysis and artificial intelligence.</p></div></article>
  </div>
- <h2>Popular courses</h2><div class="grid">{% for c in cs %}<article class="card"><p class="muted">{{c.category}} · {{c.level}}</p><h3>{{c.title}}</h3><p>{{c.description}}</p><a href="/course/{{c.id}}">View course →</a></article>{% else %}<p>Courses are being prepared.</p>{% endfor %}</div>
- """,cs=cs)
+ <h2>Popular courses</h2><div class="grid">{% for c in cs %}<article class="card"><img class="course-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}" loading="lazy"><p class="muted">{{c.category}} · {{c.level}}</p><h3>{{c.title}}</h3><p>{{c.description}}</p><a href="/course/{{c.id}}">View course →</a></article>{% else %}<p>Courses are being prepared.</p>{% endfor %}</div>
+ """,cs=cs,image_for_course=course_image_url)
 
 @app.route("/health")
 def health(): return {"status":"ok","app":"SmartLearn"}
@@ -131,12 +159,12 @@ def health(): return {"status":"ok","app":"SmartLearn"}
 @app.route("/courses")
 def courses():
  cs=Course.query.order_by(Course.title).all()
- return page("Courses",'''<h1>Course catalogue</h1><div class="grid">{% for c in cs %}<article class="card"><p class="muted">{{c.category}} · {{c.level}}</p><h2>{{c.title}}</h2><p>{{c.description}}</p><a class="btn" href="/course/{{c.id}}">View course</a></article>{% else %}<p>No courses published yet.</p>{% endfor %}</div>''',cs=cs)
+ return page("Courses",'''<h1>Course catalogue</h1><div class="grid">{% for c in cs %}<article class="card"><img class="course-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}" loading="lazy"><p class="muted">{{c.category}} · {{c.level}}</p><h2>{{c.title}}</h2><p>{{c.description}}</p><a class="btn" href="/course/{{c.id}}">View course</a></article>{% else %}<p>No courses published yet.</p>{% endfor %}</div>''',cs=cs,image_for_course=course_image_url)
 
 @app.route("/course/<int:cid>")
 def course(cid):
  c=Course.query.get_or_404(cid)
- return page(c.title,'''<article class="card"><p class="muted">{{c.category}} · {{c.level}}</p><h1>{{c.title}}</h1><p>{{c.description}}</p>{% if current_user.is_authenticated %}<form method="post" action="/enrol/{{c.id}}"><button class="btn">Enrol in this course</button></form>{% else %}<a class="btn" href="/login">Sign in to enrol</a>{% endif %}<h2>Lessons</h2>{% for l in c.lessons|sort(attribute='position') %}<p><a href="/lesson/{{l.id}}">{{l.position}}. {{l.title}}</a></p>{% else %}<p>Lessons will be added soon.</p>{% endfor %}</article>''',c=c)
+ return page(c.title,'''<article class="card"><img class="course-detail-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}"><p class="muted">{{c.category}} · {{c.level}}</p><h1>{{c.title}}</h1><p>{{c.description}}</p>{% if current_user.is_authenticated %}<form method="post" action="/enrol/{{c.id}}"><button class="btn">Enrol in this course</button></form>{% else %}<a class="btn" href="/login">Sign in to enrol</a>{% endif %}<h2>Lessons</h2>{% for l in c.lessons|sort(attribute='position') %}<p><a href="/lesson/{{l.id}}">{{l.position}}. {{l.title}}</a></p>{% else %}<p>Lessons will be added soon.</p>{% endfor %}</article>''',c=c,image_for_course=course_image_url)
 
 @app.route("/register",methods=["GET","POST"])
 def register():
