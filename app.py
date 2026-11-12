@@ -1,8 +1,4 @@
 import os
-import csv
-import io
-import secrets
-from datetime import datetime
 from flask import Flask, request, redirect, url_for, flash, render_template_string, abort, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -45,27 +41,6 @@ class Lesson(db.Model):
  title=db.Column(db.String(160),nullable=False)
  content=db.Column(db.Text,default="")
  position=db.Column(db.Integer,default=1)
-
-class ClassGroup(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  name = db.Column(db.String(80), nullable=False, unique=True)
-  academic_year = db.Column(db.String(20), default="")
-  created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-  students = db.relationship("User", secondary="class_students", backref="class_groups")
-  teacher_assignments = db.relationship("TeacherClass", backref="class_group", cascade="all, delete-orphan")
-
-class_students = db.Table("class_students",
-  db.Column("class_id", db.Integer, db.ForeignKey("class_group.id"), primary_key=True),
-  db.Column("student_id", db.Integer, db.ForeignKey("user.id"), primary_key=True))
-
-class TeacherClass(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  teacher_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-  class_id = db.Column(db.Integer, db.ForeignKey("class_group.id"), nullable=False)
-  assigned_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-  created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-  teacher = db.relationship("User", foreign_keys=[teacher_id])
-  __table_args__ = (db.UniqueConstraint("teacher_id", "class_id", name="uq_teacher_class"),)
 
 @login_manager.user_loader
 def load_user(uid): return db.session.get(User,int(uid))
@@ -134,7 +109,7 @@ article.card h2:first-child,article.card h3:first-child{margin-top:0}
 @media(max-width:700px){nav{gap:13px;padding:13px 18px}nav a{font-size:14px}.brand{font-size:22px}main{margin:26px auto 38px;padding:0 16px}.home-hero{min-height:330px;padding:28px 22px}.card{padding:20px}.visual-card img{height:155px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
-{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_teacher %}<a href="/teacher">Teacher</a>{% endif %}{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
+{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day<br><span style="font-size:14px">Developed by <strong>Isaac NKURUNZIZA</strong></span></footer></body></html>"""
 def page(title,body,**ctx): return render_template_string(BASE,title=title,body=render_template_string(body,**ctx),**ctx)
 
@@ -223,9 +198,7 @@ def admin_required():
 def inject_admin_status():
     admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
     is_admin = bool(current_user.is_authenticated and admin_email and current_user.email.lower() == admin_email)
-    is_teacher = bool(current_user.is_authenticated and
-        TeacherClass.query.filter_by(teacher_id=current_user.id).first())
-    return {"is_smartlearn_admin": is_admin, "is_smartlearn_teacher": is_teacher}
+    return {"is_smartlearn_admin": is_admin}
 
 @app.route("/admin")
 @login_required
@@ -240,7 +213,7 @@ def admin_dashboard():
       <article class="card"><h2>{{lesson_count}}</h2><p>Lessons</p></article>
       <article class="card"><h2>{{student_count}}</h2><p>Registered learners</p></article>
     </div>
-    <p><a class="btn" href="/admin/course/new">Add a course</a> <a class="btn" href="/admin/classes">Manage classes</a></p>
+    <p><a class="btn" href="/admin/course/new">Add a course</a></p>
     <h2>Courses</h2>
     {% for c in courses %}<article class="card" style="margin:12px 0">
       <h3>{{c.title}}</h3><p>{{c.category}} · {{c.level}} · {{c.lessons|length}} lessons · {{c.students|length}} enrolled</p>
@@ -405,268 +378,6 @@ def admin_delete_course(cid):
     flash("Course and its lessons deleted.")
     return redirect(url_for("admin_dashboard"))
 
-
-@app.route("/admin/classes", methods=["GET", "POST"])
-@login_required
-def admin_classes():
-    denied = admin_required()
-    if denied: return denied
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()[:80]
-        year = request.form.get("academic_year", "").strip()[:20]
-        if not name: flash("Enter a class name.")
-        elif ClassGroup.query.filter_by(name=name).first(): flash("A class with that name already exists.")
-        else:
-            db.session.add(ClassGroup(name=name, academic_year=year)); db.session.commit()
-            flash("Class " + name + " was created.")
-        return redirect(url_for("admin_classes"))
-    groups = ClassGroup.query.order_by(ClassGroup.name).all()
-    return page("Manage classes", """
-    <h1>Class management</h1><p class="muted">Classes group students (for example S4 A or S5 B). They are independent of courses and course enrolments.</p>
-    <div class="card"><h2>Create a class</h2><form method="post"><label>Class name</label><input name="name" placeholder="e.g. S4 A" maxlength="80" required>
-    <label>Academic year (optional)</label><input name="academic_year" placeholder="e.g. 2026" maxlength="20"><button class="btn">Create class</button></form></div>
-    <h2>Existing classes</h2><div class="grid">{% for g in groups %}<article class="card"><h3>{{g.name}}</h3><p>{{g.academic_year or 'Academic year not set'}} · {{g.students|length}} students · {{g.teacher_assignments|length}} teachers</p><a class="btn" href="/admin/class/{{g.id}}">Manage class</a></article>{% else %}<p>No classes created yet.</p>{% endfor %}</div><p><a href="/admin">← Admin dashboard</a></p>
-    """, groups=groups)
-
-@app.route("/admin/class/<int:class_id>", methods=["GET", "POST"])
-@login_required
-def admin_manage_class(class_id):
-    denied = admin_required()
-    if denied: return denied
-    group = ClassGroup.query.get_or_404(class_id)
-    if request.method == "POST":
-        action = request.form.get("action", "")
-        try: member_id = int(request.form.get("member_id", ""))
-        except (TypeError, ValueError): member_id = None
-        person = User.query.get(member_id) if member_id else None
-        if not person: flash("Select a registered account.")
-        elif action == "add_student":
-            if person in group.students: flash("That student is already in this class.")
-            else:
-                group.students.append(person); db.session.commit(); flash(person.name + " was added to " + group.name + ".")
-        elif action == "remove_student":
-            if person in group.students:
-                group.students.remove(person); db.session.commit()
-                flash(person.name + " was removed from this class. Their account and course enrolments remain.")
-        elif action == "add_teacher":
-            if TeacherClass.query.filter_by(teacher_id=person.id, class_id=group.id).first(): flash("That teacher is already assigned to this class.")
-            else:
-                db.session.add(TeacherClass(teacher_id=person.id, class_id=group.id, assigned_by=current_user.id)); db.session.commit()
-                flash(person.name + " was assigned to " + group.name + ".")
-        elif action == "remove_teacher":
-            assignment = TeacherClass.query.filter_by(teacher_id=person.id, class_id=group.id).first()
-            if assignment: db.session.delete(assignment); db.session.commit(); flash(person.name + " was removed from this class.")
-        return redirect(url_for("admin_manage_class", class_id=class_id))
-    student_ids = {u.id for u in group.students}
-    teacher_ids = {a.teacher_id for a in group.teacher_assignments}
-    available_students = [u for u in User.query.order_by(User.name).all() if u.id not in student_ids]
-    available_teachers = [u for u in User.query.order_by(User.name).all() if u.id not in teacher_ids]
-    return page("Manage class", """
-    <h1>{{group.name}}</h1><p class="muted">Manage this class roster and teachers. This is separate from course enrolments.</p>
-    <div class="grid"><div class="card"><h2>Register a new student</h2><p>Create a student login and add them to this class.</p><a class="btn" href="/admin/class/{{group.id}}/students/new">Register new student</a></div>
-    <div class="card"><h2>Upload Excel sheet</h2><p>Download the ready-made template, fill in student names, then upload it.</p><a class="btn" href="/admin/class/{{group.id}}/students/template">Download Excel template</a> <a class="btn" href="/admin/class/{{group.id}}/students/import">Import students</a></div>
-    <div class="card"><h2>Add an existing student</h2><form method="post"><input type="hidden" name="action" value="add_student"><label>Registered account</label>
-    <select name="member_id" required><option value="">Choose student</option>{% for u in available_students %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Add to class</button></form></div>
-    <div class="card"><h2>Assign a teacher</h2><form method="post"><input type="hidden" name="action" value="add_teacher"><label>Registered account</label>
-    <select name="member_id" required><option value="">Choose teacher</option>{% for u in available_teachers %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Assign teacher</button></form></div></div>
-    <h2>Student register ({{group.students|length}})</h2><div class="card"><ol>{% for u in students %}<li style="margin:10px 0"><strong>{{u.name}}</strong> — {{u.email}}
-    <form method="post" style="display:inline" onsubmit="return confirm('Remove this student from the class?')"><input type="hidden" name="action" value="remove_student"><input type="hidden" name="member_id" value="{{u.id}}"><button class="btn" style="padding:6px 10px;background:#b91c1c">Remove</button></form></li>{% else %}<li>No students have been added to this class.</li>{% endfor %}</ol></div>
-    <h2>Assigned teachers</h2><div class="card"><ul>{% for a in group.teacher_assignments %}<li style="margin:10px 0"><strong>{{a.teacher.name}}</strong> — {{a.teacher.email}}
-    <form method="post" style="display:inline" onsubmit="return confirm('Remove this teacher from the class?')"><input type="hidden" name="action" value="remove_teacher"><input type="hidden" name="member_id" value="{{a.teacher_id}}"><button class="btn" style="padding:6px 10px;background:#b91c1c">Remove</button></form></li>{% else %}<li>No teachers assigned yet.</li>{% endfor %}</ul></div>
-    <p><a href="/admin/classes">← All classes</a> · <a href="/admin">Admin dashboard</a></p>
-    """, group=group, students=sorted(group.students, key=lambda u:u.name.lower()), available_students=available_students, available_teachers=available_teachers)
-
-
-
-def generate_student_login_id():
-    while True:
-        code = "SL-" + secrets.token_hex(4).upper()
-        internal_email = code.lower() + "@student.smartlearn.local"
-        if not User.query.filter_by(email=internal_email).first():
-            return code, internal_email
-
-
-@app.route("/admin/class/<int:class_id>/students/new", methods=["GET", "POST"])
-@login_required
-def admin_create_class_student(class_id):
-    denied = admin_required()
-    if denied: return denied
-    group = ClassGroup.query.get_or_404(class_id)
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        password = request.form.get("password", "").strip() or secrets.token_urlsafe(9)
-        if not name or len(password) < 8:
-            flash("Enter the student's name and a password of at least 8 characters, or leave the password blank to generate one.")
-            return redirect(url_for("admin_create_class_student", class_id=class_id))
-        student_code, internal_email = generate_student_login_id()
-        student = User(name=name, email=internal_email)
-        student.set_password(password)
-        group.students.append(student)
-        db.session.add(student)
-        db.session.commit()
-        return page("Student account created", """
-        <div class="card"><h1>Student account created</h1><p>{{student.name}} has been registered and added to {{group.name}}.</p>
-        <p><strong>Student login ID:</strong> <code>{{student_code}}</code></p><p><strong>Temporary password:</strong> <code>{{password}}</code></p>
-        <p>Give the student this ID and password. They can sign in without an email address. Save these details now; the password will not be shown again.</p>
-        <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
-        """, student=student, group=group, password=password, student_code=student_code)
-    return page("Register student", """
-    <div class="card" style="max-width:620px;margin:auto"><h1>Register a new student</h1><p class="muted">No email address is required. SmartLearn generates a student login ID automatically and adds the student to {{group.name}}.</p>
-    <form method="post"><label>Student full name</label><input name="name" required maxlength="100">
-    <label>Password (leave blank to generate a temporary password)</label><input name="password" type="text" minlength="8">
-    <button class="btn">Create student account</button></form><p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
-    """, group=group)
-
-@app.route("/admin/class/<int:class_id>/students/template")
-@login_required
-def admin_download_student_template(class_id):
-    denied = admin_required()
-    if denied: return denied
-    group = ClassGroup.query.get_or_404(class_id)
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.utils import get_column_letter
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Students"
-    sheet.append(["name", "email"])
-    for cell in sheet[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="173B67")
-        cell.alignment = Alignment(horizontal="center")
-    sheet.column_dimensions["A"].width = 32
-    sheet.column_dimensions["B"].width = 36
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = "A1:B1"
-
-    instructions = workbook.create_sheet("Instructions")
-    instructions.append(["SmartLearn student import template"])
-    instructions.append(["Class", group.name])
-    instructions.append(["Required column", "name"])
-    instructions.append(["Optional column", "email"])
-    instructions.append(["How to use", "Enter one student's full name on each row in the Students sheet."])
-    instructions.append(["Email", "Leave the email cell blank if the student does not have an email address."])
-    instructions.append(["Important", "Do not rename the name or email column headings. Delete this Instructions sheet only if you wish; it is not imported."])
-    instructions.column_dimensions["A"].width = 24
-    instructions.column_dimensions["B"].width = 105
-    instructions["A1"].font = Font(bold=True, size=14, color="173B67")
-    for row in instructions.iter_rows(min_row=2):
-        row[0].font = Font(bold=True)
-        row[1].alignment = Alignment(wrap_text=True, vertical="top")
-
-    output = io.BytesIO()
-    workbook.save(output)
-    output.seek(0)
-    safe_class = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in group.name)
-    return send_file(output, as_attachment=True,
-                     download_name=f"SmartLearn_{safe_class}_Student_Template.xlsx",
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
-@app.route("/admin/class/<int:class_id>/students/import", methods=["GET", "POST"])
-@login_required
-def admin_import_class_students(class_id):
-    denied = admin_required()
-    if denied: return denied
-    group = ClassGroup.query.get_or_404(class_id)
-    if request.method == "POST":
-        upload = request.files.get("file")
-        if not upload or not upload.filename:
-            flash("Choose an Excel (.xlsx) or CSV file.")
-            return redirect(url_for("admin_import_class_students", class_id=class_id))
-        filename = upload.filename.lower()
-        try:
-            if filename.endswith(".csv"):
-                rows = list(csv.reader(io.StringIO(upload.stream.read().decode("utf-8-sig"))))
-            elif filename.endswith(".xlsx"):
-                from openpyxl import load_workbook
-                workbook = load_workbook(io.BytesIO(upload.read()), read_only=True, data_only=True)
-                sheet = workbook.active
-                rows = list(sheet.iter_rows(values_only=True))
-                workbook.close()
-            else:
-                raise ValueError("Unsupported file type. Upload .xlsx or .csv.")
-            if not rows:
-                raise ValueError("The file is empty.")
-            headers = [str(v or "").strip().lower().replace(" ", "_") for v in rows[0]]
-            name_idx = next((headers.index(k) for k in ("name", "full_name", "student_name") if k in headers), None)
-            email_idx = next((headers.index(k) for k in ("email", "email_address") if k in headers), None)
-            if name_idx is None:
-                raise ValueError("The first row must contain a name column heading (name or full_name).")
-            created, linked, skipped, credentials = 0, 0, 0, []
-            for row in rows[1:]:
-                if not row or name_idx >= len(row): continue
-                name = str(row[name_idx] or "").strip()
-                email = str(row[email_idx] or "").strip().lower() if email_idx is not None and email_idx < len(row) else ""
-                if not name: continue
-                existing = User.query.filter_by(email=email).first() if email else None
-                if existing:
-                    if existing not in group.students:
-                        group.students.append(existing); linked += 1
-                    else: skipped += 1
-                    continue
-                student_code, internal_email = generate_student_login_id()
-                password = secrets.token_urlsafe(9)
-                student = User(name=name[:100], email=email[:150] if email else internal_email)
-                student.set_password(password)
-                group.students.append(student)
-                db.session.add(student)
-                credentials.append({"name": name, "login_id": student_code if not email else email, "password": password})
-                created += 1
-            db.session.commit()
-            return page("Student import results", """
-            <div class="card"><h1>Import complete</h1><p><strong>{{created}}</strong> new student accounts created. {{linked}} existing accounts added to this class; {{skipped}} already-existing class entries skipped.</p>
-            {% if credentials %}<h2>Student login details</h2><p>Save these details now and share them privately with each student.</p>
-            <div style="overflow-x:auto"><table><thead><tr><th>Student</th><th>Login ID / Email</th><th>Temporary password</th></tr></thead><tbody>{% for c in credentials %}<tr><td>{{c.name}}</td><td><code>{{c.login_id}}</code></td><td><code>{{c.password}}</code></td></tr>{% endfor %}</tbody></table></div>{% endif %}
-            <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
-            """, created=created, linked=linked, skipped=skipped, credentials=credentials, group=group)
-        except Exception as exc:
-            db.session.rollback()
-            flash("Import failed: " + str(exc))
-            return redirect(url_for("admin_import_class_students", class_id=class_id))
-    return page("Import students", """
-    <div class="card" style="max-width:720px;margin:auto"><h1>Import students into {{group.name}}</h1>
-    <p>Upload an Excel (.xlsx) or CSV file. The first worksheet must contain a <code>name</code> column. An <code>email</code> column is optional.</p><p><a class="btn" href="/admin/class/{{group.id}}/students/template">Download Excel template</a></p>
-    <p>Example:</p><div style="overflow-x:auto"><table><tr><th>name</th></tr><tr><td>Jane Doe</td></tr><tr><td>John Smith</td></tr></table></div>
-    <p>For students without email, SmartLearn generates a login ID and temporary password. If you include email, it can be used as their login.</p>
-    <form method="post" enctype="multipart/form-data"><label>Select Excel or CSV file</label><input type="file" name="file" accept=".xlsx,.csv" required><button class="btn">Upload and import students</button></form>
-    <p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
-    """, group=group)
-
-@app.route("/teacher")
-@login_required
-def teacher_dashboard():
-    class_assignments = TeacherClass.query.filter_by(teacher_id=current_user.id).all()
-    if not class_assignments: abort(403)
-    return page("Teacher dashboard", """
-    <h1>Teacher dashboard</h1><p class="muted">Welcome, {{current_user.name}}. Your assigned classes are listed below.</p>
-    <h2>My classes</h2><div class="grid">{% for item in class_assignments %}<article class="card"><p class="muted">Class register</p><h2>{{item.class_group.name}}</h2><p>{{item.class_group.academic_year or 'Academic year not set'}} · {{item.class_group.students|length}} students</p><a class="btn" href="/teacher/class/{{item.class_id}}">View student list</a></article>{% else %}<p>No classes assigned yet.</p>{% endfor %}</div>
-    """, class_assignments=class_assignments)
-
-@app.route("/teacher/class/<int:class_id>")
-@login_required
-def teacher_class_register(class_id):
-    assignment = TeacherClass.query.filter_by(teacher_id=current_user.id, class_id=class_id).first()
-    if not assignment: abort(403)
-    group = ClassGroup.query.get_or_404(class_id)
-    students = sorted(group.students, key=lambda u:u.name.lower())
-    return page("Class register", """
-    <h1>{{group.name}} — Class register</h1><p class="muted">{{group.academic_year or 'Academic year not set'}} · {{students|length}} students</p>
-    <div class="card" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px"><thead><tr><th style="text-align:left;padding:10px">No.</th><th style="text-align:left;padding:10px">Student name</th><th style="text-align:left;padding:10px">Email</th></tr></thead>
-    <tbody>{% for student in students %}<tr><td style="padding:10px">{{loop.index}}</td><td>{{student.name}}</td><td>{{student.email}}</td></tr>{% else %}<tr><td colspan="3">No students have been added to this class.</td></tr>{% endfor %}</tbody></table></div><p><a href="/teacher">← Teacher dashboard</a></p>
-    """, group=group, students=students)
-
-@app.route("/logout")
-@login_required
-def logout(): logout_user(); return redirect(url_for("home"))
-
-@app.route("/enrol/<int:cid>",methods=["POST"])
-@login_required
-def enrol(cid):
- c=Course.query.get_or_404(cid)
- if c not in current_user.courses: current_user.courses.append(c); db.session.commit()
- flash("You are enrolled in "+c.title); return redirect(url_for("dashboard"))
 
 @app.route("/dashboard")
 @login_required
