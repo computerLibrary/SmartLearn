@@ -276,7 +276,6 @@ with app.app_context():
   seeds=[("Computer Fundamentals","ICT","Understand computer hardware, software, data representation and basic computer operations.","Beginner"),("Google Docs","Productivity","Create, format, collaborate on and share professional documents.","Beginner"),("HTML and CSS","Web Design","Build structured web pages and style them using CSS.","Beginner"),("Database and SQL","Programming","Learn relational databases, tables, queries and SQL operations.","Intermediate"),("Python Programming","Programming","Develop programming skills using Python fundamentals.","Beginner"),("Computer Networking","Networking","Explore network devices, addressing, protocols and security basics.","Intermediate")]
   for title,cat,desc,level in seeds: db.session.add(Course(title=title,category=cat,description=desc,level=level))
   db.session.commit()
-=="__main__": app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000)))
 
 # Add structured starter lessons to existing courses without duplicating content.
 # Existing courses and enrolments are preserved; courses with lessons are left unchanged.
@@ -414,16 +413,17 @@ lesson_catalog = {
     ]
   ]
 }
-for course_title, lesson_items in lesson_catalog.items():
-    course_record = Course.query.filter_by(title=course_title).first()
-    if course_record and Lesson.query.filter_by(course_id=course_record.id).count() == 0:
-        for lesson_index, (lesson_title, lesson_content) in enumerate(lesson_items, start=1):
-            db.session.add(Lesson(
-                course_id=course_record.id,
-                title=lesson_title,
-                content=lesson_content,
-                position=lesson_index
-            ))
-        db.session.commit()
+with app.app_context():
+    for course_title, lesson_items in lesson_catalog.items():
+        course_record = Course.query.filter_by(title=course_title).first()
+        if course_record and Lesson.query.filter_by(course_id=course_record.id).count() == 0:
+            for lesson_index, (lesson_title, lesson_content) in enumerate(lesson_items, start=1):
+                db.session.add(Lesson(
+                    course_id=course_record.id,
+                    title=lesson_title,
+                    content=lesson_content,
+                    position=lesson_index
+                ))
+            db.session.commit()
 
 if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000)))
