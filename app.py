@@ -43,6 +43,27 @@ class Lesson(db.Model):
  content=db.Column(db.Text,default="")
  position=db.Column(db.Integer,default=1)
 
+class ClassGroup(db.Model):
+  id = db.Column(db.Integer, primary_key=True)
+  name = db.Column(db.String(80), nullable=False, unique=True)
+  academic_year = db.Column(db.String(20), default="")
+  created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+  students = db.relationship("User", secondary="class_students", backref="class_groups")
+  teacher_assignments = db.relationship("TeacherClass", backref="class_group", cascade="all, delete-orphan")
+
+class_students = db.Table("class_students",
+  db.Column("class_id", db.Integer, db.ForeignKey("class_group.id"), primary_key=True),
+  db.Column("student_id", db.Integer, db.ForeignKey("user.id"), primary_key=True))
+
+class TeacherClass(db.Model):
+  id = db.Column(db.Integer, primary_key=True)
+  teacher_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+  class_id = db.Column(db.Integer, db.ForeignKey("class_group.id"), nullable=False)
+  assigned_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+  created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+  teacher = db.relationship("User", foreign_keys=[teacher_id])
+  __table_args__ = (db.UniqueConstraint("teacher_id", "class_id", name="uq_teacher_class"),)
+
 class TeacherCourse(db.Model):
  id = db.Column(db.Integer, primary_key=True)
  teacher_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -249,7 +270,10 @@ def admin_required():
 def inject_admin_status():
     admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
     is_admin = bool(current_user.is_authenticated and admin_email and current_user.email.lower() == admin_email)
-    is_teacher = bool(current_user.is_authenticated and TeacherCourse.query.filter_by(teacher_id=current_user.id).first())
+    is_teacher = bool(current_user.is_authenticated and (
+        TeacherCourse.query.filter_by(teacher_id=current_user.id).first()
+        or TeacherClass.query.filter_by(teacher_id=current_user.id).first()
+    ))
     return {"is_smartlearn_admin": is_admin, "is_smartlearn_teacher": is_teacher}
 
 def teacher_course_assignment(course_id):
@@ -269,7 +293,7 @@ def admin_dashboard():
       <article class="card"><h2>{{lesson_count}}</h2><p>Lessons</p></article>
       <article class="card"><h2>{{student_count}}</h2><p>Registered learners</p></article>
     </div>
-    <p><a class="btn" href="/admin/course/new">Add a course</a></p>
+    <p><a class="btn" href="/admin/course/new">Add a course</a> <a class="btn" href="/admin/classes">Manage classes</a></p>
     <h2>Courses</h2>
     {% for c in courses %}<article class="card" style="margin:12px 0">
       <h3>{{c.title}}</h3><p>{{c.category}} · {{c.level}} · {{c.lessons|length}} lessons · {{c.students|length}} enrolled</p>
@@ -479,17 +503,98 @@ def admin_remove_course_teacher(cid, uid):
     flash("Teacher assignment removed. Previously saved marks have been retained.")
     return redirect(url_for("admin_course_teachers", cid=cid))
 
+@app.route("/admin/classes", methods=["GET", "POST"])
+@login_required
+def admin_classes():
+    denied = admin_required()
+    if denied: return denied
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()[:80]
+        year = request.form.get("academic_year", "").strip()[:20]
+        if not name: flash("Enter a class name.")
+        elif ClassGroup.query.filter_by(name=name).first(): flash("A class with that name already exists.")
+        else:
+            db.session.add(ClassGroup(name=name, academic_year=year)); db.session.commit()
+            flash("Class " + name + " was created.")
+        return redirect(url_for("admin_classes"))
+    groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    return page("Manage classes", """
+    <h1>Class management</h1><p class="muted">Classes group students (for example S4 A or S5 B). They are independent of courses and course enrolments.</p>
+    <div class="card"><h2>Create a class</h2><form method="post"><label>Class name</label><input name="name" placeholder="e.g. S4 A" maxlength="80" required>
+    <label>Academic year (optional)</label><input name="academic_year" placeholder="e.g. 2026" maxlength="20"><button class="btn">Create class</button></form></div>
+    <h2>Existing classes</h2><div class="grid">{% for g in groups %}<article class="card"><h3>{{g.name}}</h3><p>{{g.academic_year or 'Academic year not set'}} · {{g.students|length}} students · {{g.teacher_assignments|length}} teachers</p><a class="btn" href="/admin/class/{{g.id}}">Manage class</a></article>{% else %}<p>No classes created yet.</p>{% endfor %}</div><p><a href="/admin">← Admin dashboard</a></p>
+    """, groups=groups)
+
+@app.route("/admin/class/<int:class_id>", methods=["GET", "POST"])
+@login_required
+def admin_manage_class(class_id):
+    denied = admin_required()
+    if denied: return denied
+    group = ClassGroup.query.get_or_404(class_id)
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        try: member_id = int(request.form.get("member_id", ""))
+        except (TypeError, ValueError): member_id = None
+        person = User.query.get(member_id) if member_id else None
+        if not person: flash("Select a registered account.")
+        elif action == "add_student":
+            if person in group.students: flash("That student is already in this class.")
+            else:
+                group.students.append(person); db.session.commit(); flash(person.name + " was added to " + group.name + ".")
+        elif action == "remove_student":
+            if person in group.students:
+                group.students.remove(person); db.session.commit()
+                flash(person.name + " was removed from this class. Their account and course enrolments remain.")
+        elif action == "add_teacher":
+            if TeacherClass.query.filter_by(teacher_id=person.id, class_id=group.id).first(): flash("That teacher is already assigned to this class.")
+            else:
+                db.session.add(TeacherClass(teacher_id=person.id, class_id=group.id, assigned_by=current_user.id)); db.session.commit()
+                flash(person.name + " was assigned to " + group.name + ".")
+        elif action == "remove_teacher":
+            assignment = TeacherClass.query.filter_by(teacher_id=person.id, class_id=group.id).first()
+            if assignment: db.session.delete(assignment); db.session.commit(); flash(person.name + " was removed from this class.")
+        return redirect(url_for("admin_manage_class", class_id=class_id))
+    student_ids = {u.id for u in group.students}
+    teacher_ids = {a.teacher_id for a in group.teacher_assignments}
+    available_students = [u for u in User.query.order_by(User.name).all() if u.id not in student_ids]
+    available_teachers = [u for u in User.query.order_by(User.name).all() if u.id not in teacher_ids]
+    return page("Manage class", """
+    <h1>{{group.name}}</h1><p class="muted">Manage this class roster and teachers. This is separate from course enrolments.</p>
+    <div class="grid"><div class="card"><h2>Add a student</h2><form method="post"><input type="hidden" name="action" value="add_student"><label>Registered account</label>
+    <select name="member_id" required><option value="">Choose student</option>{% for u in available_students %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Add to class</button></form></div>
+    <div class="card"><h2>Assign a teacher</h2><form method="post"><input type="hidden" name="action" value="add_teacher"><label>Registered account</label>
+    <select name="member_id" required><option value="">Choose teacher</option>{% for u in available_teachers %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Assign teacher</button></form></div></div>
+    <h2>Student register ({{group.students|length}})</h2><div class="card"><ol>{% for u in students %}<li style="margin:10px 0"><strong>{{u.name}}</strong> — {{u.email}}
+    <form method="post" style="display:inline" onsubmit="return confirm('Remove this student from the class?')"><input type="hidden" name="action" value="remove_student"><input type="hidden" name="member_id" value="{{u.id}}"><button class="btn" style="padding:6px 10px;background:#b91c1c">Remove</button></form></li>{% else %}<li>No students have been added to this class.</li>{% endfor %}</ol></div>
+    <h2>Assigned teachers</h2><div class="card"><ul>{% for a in group.teacher_assignments %}<li style="margin:10px 0"><strong>{{a.teacher.name}}</strong> — {{a.teacher.email}}
+    <form method="post" style="display:inline" onsubmit="return confirm('Remove this teacher from the class?')"><input type="hidden" name="action" value="remove_teacher"><input type="hidden" name="member_id" value="{{a.teacher_id}}"><button class="btn" style="padding:6px 10px;background:#b91c1c">Remove</button></form></li>{% else %}<li>No teachers assigned yet.</li>{% endfor %}</ul></div>
+    <p><a href="/admin/classes">← All classes</a> · <a href="/admin">Admin dashboard</a></p>
+    """, group=group, students=sorted(group.students, key=lambda u:u.name.lower()), available_students=available_students, available_teachers=available_teachers)
+
 @app.route("/teacher")
 @login_required
 def teacher_dashboard():
     assignments = TeacherCourse.query.filter_by(teacher_id=current_user.id).all()
-    if not assignments: abort(403)
+    class_assignments = TeacherClass.query.filter_by(teacher_id=current_user.id).all()
+    if not assignments and not class_assignments: abort(403)
     return page("Teacher dashboard", """
-    <h1>Teacher dashboard</h1><p class="muted">Welcome, {{current_user.name}}. Choose a course to record or review student marks.</p>
-    <div class="grid">{% for item in assignments %}<article class="card"><p class="muted">Assigned course</p><h2>{{item.course.title}}</h2>
-      <p>{{item.course.category}} · {{item.course.level}}</p><p>{{item.course.students|length}} enrolled students</p>
-      <a class="btn" href="/teacher/course/{{item.course_id}}/marks">Open marks register</a></article>{% endfor %}</div>
-    """, assignments=assignments)
+    <h1>Teacher dashboard</h1><p class="muted">Welcome, {{current_user.name}}. Your classes and courses are listed separately.</p>
+    <h2>My classes</h2><div class="grid">{% for item in class_assignments %}<article class="card"><p class="muted">Class register</p><h2>{{item.class_group.name}}</h2><p>{{item.class_group.academic_year or 'Academic year not set'}} · {{item.class_group.students|length}} students</p><a class="btn" href="/teacher/class/{{item.class_id}}">View student list</a></article>{% else %}<p>No classes assigned yet.</p>{% endfor %}</div>
+    <h2>My courses</h2><div class="grid">{% for item in assignments %}<article class="card"><p class="muted">Assigned course</p><h2>{{item.course.title}}</h2><p>{{item.course.category}} · {{item.course.level}}</p><p>{{item.course.students|length}} enrolled students</p><a class="btn" href="/teacher/course/{{item.course_id}}/marks">Open marks register</a></article>{% else %}<p>No courses assigned yet.</p>{% endfor %}</div>
+    """, assignments=assignments, class_assignments=class_assignments)
+
+@app.route("/teacher/class/<int:class_id>")
+@login_required
+def teacher_class_register(class_id):
+    assignment = TeacherClass.query.filter_by(teacher_id=current_user.id, class_id=class_id).first()
+    if not assignment: abort(403)
+    group = ClassGroup.query.get_or_404(class_id)
+    students = sorted(group.students, key=lambda u:u.name.lower())
+    return page("Class register", """
+    <h1>{{group.name}} — Class register</h1><p class="muted">{{group.academic_year or 'Academic year not set'}} · {{students|length}} students</p>
+    <div class="card" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px"><thead><tr><th style="text-align:left;padding:10px">No.</th><th style="text-align:left;padding:10px">Student name</th><th style="text-align:left;padding:10px">Email</th></tr></thead>
+    <tbody>{% for student in students %}<tr><td style="padding:10px">{{loop.index}}</td><td>{{student.name}}</td><td>{{student.email}}</td></tr>{% else %}<tr><td colspan="3">No students have been added to this class.</td></tr>{% endfor %}</tbody></table></div><p><a href="/teacher">← Teacher dashboard</a></p>
+    """, group=group, students=students)
 
 @app.route("/teacher/course/<int:cid>/marks")
 @login_required
