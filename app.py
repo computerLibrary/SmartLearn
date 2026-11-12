@@ -101,6 +101,8 @@ textarea{line-height:1.65}
 .notice{padding:14px 17px;background:#e7f7ef;border:1px solid #b9e8d0;color:#176344;border-radius:11px;margin:14px 0}
 footer{border-top:1px solid var(--sl-border);background:#fff;text-align:center;color:var(--sl-muted);padding:30px 20px;margin-top:54px;font-size:14px}
 article.card h2:first-child,article.card h3:first-child{margin-top:0}
+.lesson-content{font-family:'Bookman Old Style',Bookman,'URW Bookman',Georgia,serif;font-size:17px;line-height:1.85;letter-spacing:.05px;color:#263449}
+.lesson-content h1,.lesson-content h2,.lesson-content h3{font-family:'Bookman Old Style',Bookman,'URW Bookman',Georgia,serif;letter-spacing:0}
 @media(max-width:700px){nav{gap:13px;padding:13px 18px}nav a{font-size:14px}.brand{font-size:22px}main{margin:26px auto 38px;padding:0 16px}.home-hero{min-height:330px;padding:28px 22px}.card{padding:20px}.visual-card img{height:155px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
@@ -275,7 +277,7 @@ def dashboard():
 def lesson(lid):
  l=Lesson.query.get_or_404(lid)
  if l.course not in current_user.courses: abort(403)
- return page(l.title,'''<article class="card"><p><a href="/course/{{l.course.id}}">← {{l.course.title}}</a></p><h1>{{l.title}}</h1><div style="white-space:pre-wrap;line-height:1.7">{{l.content}}</div></article>''',l=l)
+ return page(l.title,'''<article class="card"><p><a href="/course/{{l.course.id}}">← {{l.course.title}}</a></p><h1>{{l.title}}</h1><div class="lesson-content" style="white-space:pre-wrap">{{l.content}}</div></article>''',l=l)
 
 with app.app_context():
  db.create_all()
