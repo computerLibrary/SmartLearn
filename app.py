@@ -226,6 +226,9 @@ with app.app_context():
  # SQLAlchemy create_all() creates missing tables but does not add new columns.
  from sqlalchemy import inspect
  schema_updates = {
+  "user": {
+   "password_hash": "VARCHAR(255) NULL"
+  },
   "course": {
    "category": "VARCHAR(80) DEFAULT 'ICT'",
    "description": "TEXT",
@@ -245,6 +248,19 @@ with app.app_context():
       connection.exec_driver_sql(
        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"
       )
+      existing.add(column_name)
+  # The previous SmartLearn version stored password hashes in user.password.
+  # Copy them into the new password_hash column without deleting existing accounts.
+  if inspector.has_table("user"):
+   existing_user_columns = {column["name"] for column in inspect(db.engine).get_columns("user")}
+   if "password" in existing_user_columns and "password_hash" in existing_user_columns:
+    connection.exec_driver_sql(
+     "UPDATE user SET password_hash = password WHERE password_hash IS NULL OR password_hash = ''"
+    )
+   elif "password_hash" in existing_user_columns:
+    connection.exec_driver_sql(
+     "UPDATE user SET password_hash = '' WHERE password_hash IS NULL"
+    )
  if Course.query.count()==0:
   seeds=[("Computer Fundamentals","ICT","Understand computer hardware, software, data representation and basic computer operations.","Beginner"),("Google Docs","Productivity","Create, format, collaborate on and share professional documents.","Beginner"),("HTML and CSS","Web Design","Build structured web pages and style them using CSS.","Beginner"),("Database and SQL","Programming","Learn relational databases, tables, queries and SQL operations.","Intermediate"),("Python Programming","Programming","Develop programming skills using Python fundamentals.","Beginner"),("Computer Networking","Networking","Explore network devices, addressing, protocols and security basics.","Intermediate")]
   for title,cat,desc,level in seeds: db.session.add(Course(title=title,category=cat,description=desc,level=level))
