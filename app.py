@@ -3,7 +3,7 @@ import csv
 import io
 import secrets
 from datetime import datetime
-from flask import Flask, request, redirect, url_for, flash, render_template_string, abort
+from flask import Flask, request, redirect, url_for, flash, render_template_string, abort, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -566,7 +566,7 @@ def admin_manage_class(class_id):
     return page("Manage class", """
     <h1>{{group.name}}</h1><p class="muted">Manage this class roster and teachers. This is separate from course enrolments.</p>
     <div class="grid"><div class="card"><h2>Register a new student</h2><p>Create a student login and add them to this class.</p><a class="btn" href="/admin/class/{{group.id}}/students/new">Register new student</a></div>
-    <div class="card"><h2>Upload Excel sheet</h2><p>Import many students from an .xlsx or .csv file.</p><a class="btn" href="/admin/class/{{group.id}}/students/import">Import students</a></div>
+    <div class="card"><h2>Upload Excel sheet</h2><p>Download the ready-made template, fill in student names, then upload it.</p><a class="btn" href="/admin/class/{{group.id}}/students/template">Download Excel template</a> <a class="btn" href="/admin/class/{{group.id}}/students/import">Import students</a></div>
     <div class="card"><h2>Add an existing student</h2><form method="post"><input type="hidden" name="action" value="add_student"><label>Registered account</label>
     <select name="member_id" required><option value="">Choose student</option>{% for u in available_students %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Add to class</button></form></div>
     <div class="card"><h2>Assign a teacher</h2><form method="post"><input type="hidden" name="action" value="add_teacher"><label>Registered account</label>
@@ -618,6 +618,53 @@ def admin_create_class_student(class_id):
     <label>Password (leave blank to generate a temporary password)</label><input name="password" type="text" minlength="8">
     <button class="btn">Create student account</button></form><p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
     """, group=group)
+
+@app.route("/admin/class/<int:class_id>/students/template")
+@login_required
+def admin_download_student_template(class_id):
+    denied = admin_required()
+    if denied: return denied
+    group = ClassGroup.query.get_or_404(class_id)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Students"
+    sheet.append(["name", "email"])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="173B67")
+        cell.alignment = Alignment(horizontal="center")
+    sheet.column_dimensions["A"].width = 32
+    sheet.column_dimensions["B"].width = 36
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = "A1:B1"
+
+    instructions = workbook.create_sheet("Instructions")
+    instructions.append(["SmartLearn student import template"])
+    instructions.append(["Class", group.name])
+    instructions.append(["Required column", "name"])
+    instructions.append(["Optional column", "email"])
+    instructions.append(["How to use", "Enter one student's full name on each row in the Students sheet."])
+    instructions.append(["Email", "Leave the email cell blank if the student does not have an email address."])
+    instructions.append(["Important", "Do not rename the name or email column headings. Delete this Instructions sheet only if you wish; it is not imported."])
+    instructions.column_dimensions["A"].width = 24
+    instructions.column_dimensions["B"].width = 105
+    instructions["A1"].font = Font(bold=True, size=14, color="173B67")
+    for row in instructions.iter_rows(min_row=2):
+        row[0].font = Font(bold=True)
+        row[1].alignment = Alignment(wrap_text=True, vertical="top")
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    safe_class = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in group.name)
+    return send_file(output, as_attachment=True,
+                     download_name=f"SmartLearn_{safe_class}_Student_Template.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 
 @app.route("/admin/class/<int:class_id>/students/import", methods=["GET", "POST"])
 @login_required
@@ -682,7 +729,7 @@ def admin_import_class_students(class_id):
             return redirect(url_for("admin_import_class_students", class_id=class_id))
     return page("Import students", """
     <div class="card" style="max-width:720px;margin:auto"><h1>Import students into {{group.name}}</h1>
-    <p>Upload an Excel (.xlsx) or CSV file. The first worksheet must contain a <code>name</code> column. An <code>email</code> column is optional.</p>
+    <p>Upload an Excel (.xlsx) or CSV file. The first worksheet must contain a <code>name</code> column. An <code>email</code> column is optional.</p><p><a class="btn" href="/admin/class/{{group.id}}/students/template">Download Excel template</a></p>
     <p>Example:</p><div style="overflow-x:auto"><table><tr><th>name</th></tr><tr><td>Jane Doe</td></tr><tr><td>John Smith</td></tr></table></div>
     <p>For students without email, SmartLearn generates a login ID and temporary password. If you include email, it can be used as their login.</p>
     <form method="post" enctype="multipart/form-data"><label>Select Excel or CSV file</label><input type="file" name="file" accept=".xlsx,.csv" required><button class="btn">Upload and import students</button></form>
