@@ -43,6 +43,58 @@ class Lesson(db.Model):
  content=db.Column(db.Text,default="")
  position=db.Column(db.Integer,default=1)
 
+class TeacherCourse(db.Model):
+ id = db.Column(db.Integer, primary_key=True)
+ teacher_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+ course_id = db.Column(db.Integer, db.ForeignKey("course.id"), nullable=False)
+ assigned_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+ created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+ teacher = db.relationship("User", foreign_keys=[teacher_id])
+ course = db.relationship("Course", backref=db.backref("teacher_assignments", cascade="all, delete-orphan"))
+ __table_args__ = (db.UniqueConstraint("teacher_id", "course_id", name="uq_teacher_course"),)
+
+class MarkRecord(db.Model):
+ id = db.Column(db.Integer, primary_key=True)
+ student_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+ course_id = db.Column(db.Integer, db.ForeignKey("course.id"), nullable=False)
+ teacher_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+ term = db.Column(db.String(40), nullable=False, default="Term 1")
+ academic_year = db.Column(db.String(20), nullable=False)
+ assignment_score = db.Column(db.Float, nullable=False, default=0)
+ assignment_max = db.Column(db.Float, nullable=False, default=10)
+ cat_score = db.Column(db.Float, nullable=False, default=0)
+ cat_max = db.Column(db.Float, nullable=False, default=10)
+ midterm_score = db.Column(db.Float, nullable=False, default=0)
+ midterm_max = db.Column(db.Float, nullable=False, default=30)
+ final_score = db.Column(db.Float, nullable=False, default=0)
+ final_max = db.Column(db.Float, nullable=False, default=50)
+ teacher_comment = db.Column(db.Text, default="")
+ updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+ student = db.relationship("User", foreign_keys=[student_id])
+ teacher = db.relationship("User", foreign_keys=[teacher_id])
+ course = db.relationship("Course", backref=db.backref("mark_records", cascade="all, delete-orphan"))
+ __table_args__ = (db.UniqueConstraint("student_id", "course_id", "term", "academic_year", name="uq_student_course_term_year"),)
+
+ @property
+ def total_score(self):
+  return self.assignment_score + self.cat_score + self.midterm_score + self.final_score
+
+ @property
+ def total_max(self):
+  return self.assignment_max + self.cat_max + self.midterm_max + self.final_max
+
+ @property
+ def percentage(self):
+  return (self.total_score / self.total_max * 100) if self.total_max else 0
+
+ @property
+ def grade(self):
+  if self.percentage >= 80: return "A"
+  if self.percentage >= 70: return "B"
+  if self.percentage >= 60: return "C"
+  if self.percentage >= 50: return "D"
+  return "F"
+
 @login_manager.user_loader
 def load_user(uid): return db.session.get(User,int(uid))
 
@@ -110,7 +162,7 @@ article.card h2:first-child,article.card h3:first-child{margin-top:0}
 @media(max-width:700px){nav{gap:13px;padding:13px 18px}nav a{font-size:14px}.brand{font-size:22px}main{margin:26px auto 38px;padding:0 16px}.home-hero{min-height:330px;padding:28px 22px}.card{padding:20px}.visual-card img{height:155px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
-{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
+{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_teacher %}<a href="/teacher">Teacher</a>{% endif %}{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day<br><span style="font-size:14px">Developed by <strong>Isaac NKURUNZIZA</strong></span></footer></body></html>"""
 def page(title,body,**ctx): return render_template_string(BASE,title=title,body=render_template_string(body,**ctx),**ctx)
 
@@ -196,7 +248,13 @@ def admin_required():
 @app.context_processor
 def inject_admin_status():
     admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
-    return {"is_smartlearn_admin": bool(current_user.is_authenticated and admin_email and current_user.email.lower() == admin_email)}
+    is_admin = bool(current_user.is_authenticated and admin_email and current_user.email.lower() == admin_email)
+    is_teacher = bool(current_user.is_authenticated and TeacherCourse.query.filter_by(teacher_id=current_user.id).first())
+    return {"is_smartlearn_admin": is_admin, "is_smartlearn_teacher": is_teacher}
+
+def teacher_course_assignment(course_id):
+    if not current_user.is_authenticated: return None
+    return TeacherCourse.query.filter_by(teacher_id=current_user.id, course_id=course_id).first()
 
 @app.route("/admin")
 @login_required
@@ -215,7 +273,7 @@ def admin_dashboard():
     <h2>Courses</h2>
     {% for c in courses %}<article class="card" style="margin:12px 0">
       <h3>{{c.title}}</h3><p>{{c.category}} · {{c.level}} · {{c.lessons|length}} lessons · {{c.students|length}} enrolled</p>
-      <a href="/course/{{c.id}}">View course</a> · <a href="/admin/course/{{c.id}}/edit">Edit course</a> · <a href="/admin/course/{{c.id}}/lesson/new">Add lesson</a> · <a href="/admin/course/{{c.id}}/students">Manage enrolled students</a>
+      <a href="/course/{{c.id}}">View course</a> · <a href="/admin/course/{{c.id}}/edit">Edit course</a> · <a href="/admin/course/{{c.id}}/lesson/new">Add lesson</a> · <a href="/admin/course/{{c.id}}/students">Manage enrolled students</a> · <a href="/admin/course/{{c.id}}/teachers">Assign teachers</a>
       <form method="post" action="/admin/course/{{c.id}}/delete" onsubmit="return confirm('Delete this course and its lessons?')"><button class="btn" style="background:#b91c1c;margin-top:10px">Delete course</button></form>
     </article>{% else %}<p>No courses yet.</p>{% endfor %}
     <h2>Registered learners</h2><div class="card"><ul>{% for u in users %}<li>{{u.name}} — {{u.email}} — {{u.courses|length}} enrolled</li>{% else %}<li>No learners registered.</li>{% endfor %}</ul></div>
@@ -316,7 +374,7 @@ def admin_course_students(cid):
     return page("Course management", """
     <h1>{{c.title}}</h1>
     <p class="muted">Manage lesson content and students enrolled in this course.</p>
-    <p><a class="btn" href="/admin/course/{{c.id}}/edit">Edit course details</a> <a class="btn" href="/admin/course/{{c.id}}/lesson/new">Add lesson</a></p>
+    <p><a class="btn" href="/admin/course/{{c.id}}/edit">Edit course details</a> <a class="btn" href="/admin/course/{{c.id}}/lesson/new">Add lesson</a> <a class="btn" href="/admin/course/{{c.id}}/teachers">Assign teachers</a></p>
     <h2>Lessons</h2>
     {% for lesson in lessons %}<article class="card" style="margin:10px 0"><strong>{{lesson.position}}. {{lesson.title}}</strong><p class="muted">{{(lesson.content or '')[:180]}}{% if lesson.content and lesson.content|length > 180 %}…{% endif %}</p><a href="/admin/lesson/{{lesson.id}}/edit">Edit lesson content</a></article>{% else %}<p>No lessons added yet.</p>{% endfor %}
     <h2>Enrolled students ({{c.students|length}})</h2>
@@ -376,6 +434,148 @@ def admin_delete_course(cid):
     flash("Course and its lessons deleted.")
     return redirect(url_for("admin_dashboard"))
 
+
+@app.route("/admin/course/<int:cid>/teachers", methods=["GET", "POST"])
+@login_required
+def admin_course_teachers(cid):
+    denied = admin_required()
+    if denied: return denied
+    c = Course.query.get_or_404(cid)
+    if request.method == "POST":
+        try: teacher_id = int(request.form.get("teacher_id", ""))
+        except (TypeError, ValueError):
+            flash("Please select a registered user.")
+            return redirect(url_for("admin_course_teachers", cid=cid))
+        teacher = User.query.get_or_404(teacher_id)
+        if TeacherCourse.query.filter_by(teacher_id=teacher.id, course_id=c.id).first():
+            flash("That user is already assigned to this course.")
+        else:
+            db.session.add(TeacherCourse(teacher_id=teacher.id, course_id=c.id, assigned_by=current_user.id))
+            db.session.commit()
+            flash(teacher.name + " was assigned to " + c.title + ".")
+        return redirect(url_for("admin_course_teachers", cid=cid))
+    assigned = TeacherCourse.query.filter_by(course_id=c.id).all()
+    assigned_ids = {item.teacher_id for item in assigned}
+    available_users = [u for u in User.query.order_by(User.name).all() if u.id not in assigned_ids]
+    return page("Assign teachers", """
+    <h1>Teachers for {{c.title}}</h1><p class="muted">Select an existing SmartLearn account. That person will receive access to enter marks for this course.</p>
+    <div class="card"><h2>Assign a teacher</h2><form method="post"><label>Registered user</label>
+      <select name="teacher_id" required><option value="">Choose a user</option>{% for u in available_users %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select>
+      <button class="btn">Assign teacher</button></form>
+      {% if not available_users %}<p class="muted">No unassigned accounts are available. Ask the teacher to register first.</p>{% endif %}</div>
+    <h2>Assigned teachers</h2><div class="card"><ul>{% for item in assigned %}<li style="margin:12px 0"><strong>{{item.teacher.name}}</strong> — {{item.teacher.email}}
+      <form method="post" action="/admin/course/{{c.id}}/teachers/{{item.teacher_id}}/remove" style="display:inline" onsubmit="return confirm('Remove this teacher from the course? Existing marks will remain.')"><button class="btn" style="background:#b91c1c;padding:8px 12px">Remove assignment</button></form>
+    </li>{% else %}<li>No teachers assigned yet.</li>{% endfor %}</ul></div><p><a href="/admin">← Back to Admin Dashboard</a></p>
+    """, c=c, assigned=assigned, available_users=available_users)
+
+@app.route("/admin/course/<int:cid>/teachers/<int:uid>/remove", methods=["POST"])
+@login_required
+def admin_remove_course_teacher(cid, uid):
+    denied = admin_required()
+    if denied: return denied
+    assignment = TeacherCourse.query.filter_by(course_id=cid, teacher_id=uid).first_or_404()
+    db.session.delete(assignment)
+    db.session.commit()
+    flash("Teacher assignment removed. Previously saved marks have been retained.")
+    return redirect(url_for("admin_course_teachers", cid=cid))
+
+@app.route("/teacher")
+@login_required
+def teacher_dashboard():
+    assignments = TeacherCourse.query.filter_by(teacher_id=current_user.id).all()
+    if not assignments: abort(403)
+    return page("Teacher dashboard", """
+    <h1>Teacher dashboard</h1><p class="muted">Welcome, {{current_user.name}}. Choose a course to record or review student marks.</p>
+    <div class="grid">{% for item in assignments %}<article class="card"><p class="muted">Assigned course</p><h2>{{item.course.title}}</h2>
+      <p>{{item.course.category}} · {{item.course.level}}</p><p>{{item.course.students|length}} enrolled students</p>
+      <a class="btn" href="/teacher/course/{{item.course_id}}/marks">Open marks register</a></article>{% endfor %}</div>
+    """, assignments=assignments)
+
+@app.route("/teacher/course/<int:cid>/marks")
+@login_required
+def teacher_course_marks(cid):
+    if not teacher_course_assignment(cid): abort(403)
+    c = Course.query.get_or_404(cid)
+    term = request.args.get("term", "Term 1").strip()[:40] or "Term 1"
+    academic_year = request.args.get("academic_year", str(datetime.utcnow().year)).strip()[:20] or str(datetime.utcnow().year)
+    students = sorted(c.students, key=lambda student: student.name.lower())
+    records = MarkRecord.query.filter_by(course_id=cid, term=term, academic_year=academic_year).all()
+    marks_by_student = {record.student_id: record for record in records}
+    return page("Marks register", """
+    <h1>{{c.title}} — Marks register</h1><p class="muted">Enter marks for each enrolled student. Maximum marks can be customized for each assessment.</p>
+    <div class="card"><form method="get" class="grid">
+      <div><label>Term / semester</label><input name="term" value="{{term}}" maxlength="40" required></div>
+      <div><label>Academic year</label><input name="academic_year" value="{{academic_year}}" maxlength="20" required></div>
+      <div style="align-self:end"><button class="btn">Load register</button></div></form></div>
+    <div class="card" style="margin-top:18px"><h2>Assessment structure</h2>
+      <p>Assignments, CAT, Mid-term and Final examination each have an earned mark and a teacher-defined maximum. Overall percentage is calculated from total earned marks divided by total possible marks.</p>
+      <p class="muted">Default grade bands: A = 80–100%, B = 70–79%, C = 60–69%, D = 50–59%, F = below 50%.</p></div>
+    {% for student in students %}{% set record = marks_by_student.get(student.id) %}
+    <article class="card" style="margin-top:18px"><h3>{{student.name}}</h3><p class="muted">{{student.email}}</p>
+      <form method="post" action="/teacher/course/{{c.id}}/marks/{{student.id}}">
+        <input type="hidden" name="term" value="{{term}}"><input type="hidden" name="academic_year" value="{{academic_year}}">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:620px">
+          <thead><tr><th style="text-align:left;padding:8px">Assessment</th><th style="padding:8px">Mark earned</th><th style="padding:8px">Maximum mark</th></tr></thead><tbody>
+          <tr><td>Assignments</td><td><input type="number" name="assignment_score" min="0" step="0.01" required value="{{record.assignment_score if record else 0}}"></td><td><input type="number" name="assignment_max" min="0.01" step="0.01" required value="{{record.assignment_max if record else 10}}"></td></tr>
+          <tr><td>CAT</td><td><input type="number" name="cat_score" min="0" step="0.01" required value="{{record.cat_score if record else 0}}"></td><td><input type="number" name="cat_max" min="0.01" step="0.01" required value="{{record.cat_max if record else 10}}"></td></tr>
+          <tr><td>Mid-term examination</td><td><input type="number" name="midterm_score" min="0" step="0.01" required value="{{record.midterm_score if record else 0}}"></td><td><input type="number" name="midterm_max" min="0.01" step="0.01" required value="{{record.midterm_max if record else 30}}"></td></tr>
+          <tr><td>Final examination</td><td><input type="number" name="final_score" min="0" step="0.01" required value="{{record.final_score if record else 0}}"></td><td><input type="number" name="final_max" min="0.01" step="0.01" required value="{{record.final_max if record else 50}}"></td></tr>
+          </tbody></table></div>
+        <label>Teacher comment (optional)</label><textarea name="teacher_comment" rows="2" maxlength="2000">{{record.teacher_comment if record else ''}}</textarea>
+        {% if record %}<p><strong>Current result:</strong> {{'%.2f'|format(record.total_score)}} / {{'%.2f'|format(record.total_max)}} · {{'%.2f'|format(record.percentage)}}% · Grade {{record.grade}}</p>{% endif %}
+        <button class="btn">Save marks</button></form></article>
+    {% else %}<div class="card"><p>No students are enrolled in this course yet. Students must enrol before marks can be recorded.</p></div>{% endfor %}
+    <p style="margin-top:22px"><a href="/teacher">← Back to Teacher Dashboard</a></p>
+    """, c=c, term=term, academic_year=academic_year, students=students, marks_by_student=marks_by_student)
+
+@app.route("/teacher/course/<int:cid>/marks/<int:uid>", methods=["POST"])
+@login_required
+def teacher_save_marks(cid, uid):
+    if not teacher_course_assignment(cid): abort(403)
+    c = Course.query.get_or_404(cid)
+    student = User.query.get_or_404(uid)
+    if student not in c.students: abort(403)
+    term = request.form.get("term", "Term 1").strip()[:40] or "Term 1"
+    academic_year = request.form.get("academic_year", str(datetime.utcnow().year)).strip()[:20] or str(datetime.utcnow().year)
+    fields = {"assignment_score":"assignment_max", "cat_score":"cat_max", "midterm_score":"midterm_max", "final_score":"final_max"}
+    values = {}
+    try:
+        for score_field, max_field in fields.items():
+            score = float(request.form.get(score_field, ""))
+            maximum = float(request.form.get(max_field, ""))
+            if score < 0 or maximum <= 0 or score > maximum or score != score or maximum != maximum or score == float("inf") or maximum == float("inf"):
+                raise ValueError
+            values[score_field] = score
+            values[max_field] = maximum
+    except (TypeError, ValueError):
+        flash("Enter valid non-negative marks. Each maximum must be above zero, and no earned mark can exceed its maximum.")
+        return redirect(url_for("teacher_course_marks", cid=cid, term=term, academic_year=academic_year))
+    record = MarkRecord.query.filter_by(student_id=uid, course_id=cid, term=term, academic_year=academic_year).first()
+    if not record:
+        record = MarkRecord(student_id=uid, course_id=cid, term=term, academic_year=academic_year)
+        db.session.add(record)
+    for field, value in values.items(): setattr(record, field, value)
+    record.teacher_id = current_user.id
+    record.teacher_comment = request.form.get("teacher_comment", "").strip()[:2000]
+    db.session.commit()
+    flash("Marks saved for " + student.name + ".")
+    return redirect(url_for("teacher_course_marks", cid=cid, term=term, academic_year=academic_year))
+
+@app.route("/my-marks")
+@login_required
+def student_my_marks():
+    records = MarkRecord.query.filter_by(student_id=current_user.id).order_by(MarkRecord.updated_at.desc()).all()
+    return page("My marks", """
+    <h1>My academic results</h1><p class="muted">View marks recorded by your teachers.</p>
+    <div class="card" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:650px">
+      <thead><tr><th style="text-align:left;padding:10px">Course</th><th>Term / year</th><th>Assignments</th><th>CAT</th><th>Mid-term</th><th>Final</th><th>Total</th><th>Grade</th></tr></thead>
+      <tbody>{% for r in records %}<tr><td style="padding:10px">{{r.course.title}}</td><td>{{r.term}} / {{r.academic_year}}</td>
+        <td>{{'%.2f'|format(r.assignment_score)}} / {{'%.2f'|format(r.assignment_max)}}</td><td>{{'%.2f'|format(r.cat_score)}} / {{'%.2f'|format(r.cat_max)}}</td>
+        <td>{{'%.2f'|format(r.midterm_score)}} / {{'%.2f'|format(r.midterm_max)}}</td><td>{{'%.2f'|format(r.final_score)}} / {{'%.2f'|format(r.final_max)}}</td>
+        <td>{{'%.2f'|format(r.percentage)}}%</td><td>{{r.grade}}</td></tr>
+      {% else %}<tr><td colspan="8">No marks have been published yet.</td></tr>{% endfor %}</tbody></table></div><p><a href="/dashboard">← Back to My Learning</a></p>
+    """, records=records)
+
 @app.route("/logout")
 @login_required
 def logout(): logout_user(); return redirect(url_for("home"))
@@ -390,7 +590,7 @@ def enrol(cid):
 @app.route("/dashboard")
 @login_required
 def dashboard():
- return page("My learning",'''<h1>My learning</h1><p>Welcome, {{current_user.name}}.</p><div class="grid">{% for c in current_user.courses %}<article class="card"><h2>{{c.title}}</h2><p>{{c.description}}</p><a href="/course/{{c.id}}">Continue learning →</a></article>{% else %}<p>You have not enrolled in any courses. <a href="/courses">Browse courses</a>.</p>{% endfor %}</div>''')
+ return page("My learning",'''<h1>My learning</h1><p>Welcome, {{current_user.name}}.</p><p><a class="btn" href="/my-marks">View my marks and results</a></p><div class="grid">{% for c in current_user.courses %}<article class="card"><h2>{{c.title}}</h2><p>{{c.description}}</p><a href="/course/{{c.id}}">Continue learning →</a></article>{% else %}<p>You have not enrolled in any courses. <a href="/courses">Browse courses</a>.</p>{% endfor %}</div>''')
 
 @app.route("/lesson/<int:lid>")
 @login_required
