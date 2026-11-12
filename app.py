@@ -1,4 +1,7 @@
 import os
+import csv
+import io
+import secrets
 from datetime import datetime
 from flask import Flask, request, redirect, url_for, flash, render_template_string, abort
 from flask_sqlalchemy import SQLAlchemy
@@ -560,7 +563,9 @@ def admin_manage_class(class_id):
     available_teachers = [u for u in User.query.order_by(User.name).all() if u.id not in teacher_ids]
     return page("Manage class", """
     <h1>{{group.name}}</h1><p class="muted">Manage this class roster and teachers. This is separate from course enrolments.</p>
-    <div class="grid"><div class="card"><h2>Add a student</h2><form method="post"><input type="hidden" name="action" value="add_student"><label>Registered account</label>
+    <div class="grid"><div class="card"><h2>Register a new student</h2><p>Create a student login and add them to this class.</p><a class="btn" href="/admin/class/{{group.id}}/students/new">Register new student</a></div>
+    <div class="card"><h2>Upload Excel sheet</h2><p>Import many students from an .xlsx or .csv file.</p><a class="btn" href="/admin/class/{{group.id}}/students/import">Import students</a></div>
+    <div class="card"><h2>Add an existing student</h2><form method="post"><input type="hidden" name="action" value="add_student"><label>Registered account</label>
     <select name="member_id" required><option value="">Choose student</option>{% for u in available_students %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Add to class</button></form></div>
     <div class="card"><h2>Assign a teacher</h2><form method="post"><input type="hidden" name="action" value="add_teacher"><label>Registered account</label>
     <select name="member_id" required><option value="">Choose teacher</option>{% for u in available_teachers %}<option value="{{u.id}}">{{u.name}} — {{u.email}}</option>{% endfor %}</select><button class="btn">Assign teacher</button></form></div></div>
@@ -570,6 +575,111 @@ def admin_manage_class(class_id):
     <form method="post" style="display:inline" onsubmit="return confirm('Remove this teacher from the class?')"><input type="hidden" name="action" value="remove_teacher"><input type="hidden" name="member_id" value="{{a.teacher_id}}"><button class="btn" style="padding:6px 10px;background:#b91c1c">Remove</button></form></li>{% else %}<li>No teachers assigned yet.</li>{% endfor %}</ul></div>
     <p><a href="/admin/classes">← All classes</a> · <a href="/admin">Admin dashboard</a></p>
     """, group=group, students=sorted(group.students, key=lambda u:u.name.lower()), available_students=available_students, available_teachers=available_teachers)
+
+
+@app.route("/admin/class/<int:class_id>/students/new", methods=["GET", "POST"])
+@login_required
+def admin_create_class_student(class_id):
+    denied = admin_required()
+    if denied: return denied
+    group = ClassGroup.query.get_or_404(class_id)
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "").strip() or secrets.token_urlsafe(9)
+        if not name or not email or len(password) < 8:
+            flash("Enter a name, valid email and password of at least 8 characters.")
+            return redirect(url_for("admin_create_class_student", class_id=class_id))
+        if User.query.filter_by(email=email).first():
+            flash("That email is already registered. Use Add an existing student instead.")
+            return redirect(url_for("admin_create_class_student", class_id=class_id))
+        student = User(name=name, email=email)
+        student.set_password(password)
+        group.students.append(student)
+        db.session.add(student)
+        db.session.commit()
+        return page("Student account created", """
+        <div class="card"><h1>Student account created</h1><p>{{student.name}} has been registered and added to {{group.name}}.</p>
+        <p><strong>Email:</strong> {{student.email}}</p><p><strong>Temporary password:</strong> <code>{{password}}</code></p>
+        <p>Copy this password and share it privately with the student. It will not be shown again.</p>
+        <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
+        """, student=student, group=group, password=password)
+    return page("Register student", """
+    <div class="card" style="max-width:620px;margin:auto"><h1>Register a new student</h1><p class="muted">This creates a SmartLearn account and automatically adds the student to {{group.name}}.</p>
+    <form method="post"><label>Student full name</label><input name="name" required maxlength="100">
+    <label>Email address (used to sign in)</label><input name="email" type="email" required maxlength="150">
+    <label>Password (leave blank to generate a temporary password)</label><input name="password" type="text" minlength="8">
+    <button class="btn">Create student account</button></form><p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
+    """, group=group)
+
+@app.route("/admin/class/<int:class_id>/students/import", methods=["GET", "POST"])
+@login_required
+def admin_import_class_students(class_id):
+    denied = admin_required()
+    if denied: return denied
+    group = ClassGroup.query.get_or_404(class_id)
+    if request.method == "POST":
+        upload = request.files.get("file")
+        if not upload or not upload.filename:
+            flash("Choose an Excel (.xlsx) or CSV file.")
+            return redirect(url_for("admin_import_class_students", class_id=class_id))
+        filename = upload.filename.lower()
+        try:
+            if filename.endswith(".csv"):
+                rows = list(csv.reader(io.StringIO(upload.stream.read().decode("utf-8-sig"))))
+            elif filename.endswith(".xlsx"):
+                from openpyxl import load_workbook
+                workbook = load_workbook(io.BytesIO(upload.read()), read_only=True, data_only=True)
+                sheet = workbook.active
+                rows = list(sheet.iter_rows(values_only=True))
+                workbook.close()
+            else:
+                raise ValueError("Unsupported file type. Upload .xlsx or .csv.")
+            if not rows:
+                raise ValueError("The file is empty.")
+            headers = [str(v or "").strip().lower().replace(" ", "_") for v in rows[0]]
+            name_idx = next((headers.index(k) for k in ("name", "full_name", "student_name") if k in headers), None)
+            email_idx = next((headers.index(k) for k in ("email", "email_address") if k in headers), None)
+            if name_idx is None or email_idx is None:
+                raise ValueError("The first row must contain name and email column headings.")
+            created, skipped, credentials = 0, 0, []
+            for row in rows[1:]:
+                if not row or max(name_idx, email_idx) >= len(row): continue
+                name = str(row[name_idx] or "").strip()
+                email = str(row[email_idx] or "").strip().lower()
+                if not name or not email: continue
+                existing = User.query.filter_by(email=email).first()
+                if existing:
+                    skipped += 1
+                    if existing not in group.students: group.students.append(existing)
+                    continue
+                password = secrets.token_urlsafe(9)
+                student = User(name=name[:100], email=email[:150])
+                student.set_password(password)
+                group.students.append(student)
+                db.session.add(student)
+                credentials.append({"name": name, "email": email, "password": password})
+                created += 1
+            db.session.commit()
+            return page("Student import results", """
+            <div class="card"><h1>Import complete</h1><p><strong>{{created}}</strong> new accounts created and added to {{group.name}}.</p><p>{{skipped}} existing email address(es) were skipped as new accounts; existing users were added to this class if needed.</p>
+            {% if credentials %}<h2>New student login details</h2><p>Copy or save these temporary passwords now. They will not be displayed again.</p>
+            <div style="overflow-x:auto"><table><thead><tr><th>Student</th><th>Email</th><th>Temporary password</th></tr></thead><tbody>{% for c in credentials %}<tr><td>{{c.name}}</td><td>{{c.email}}</td><td><code>{{c.password}}</code></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+            <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
+            """, created=created, skipped=skipped, credentials=credentials, group=group)
+        except Exception as exc:
+            db.session.rollback()
+            flash("Import failed: " + str(exc))
+            return redirect(url_for("admin_import_class_students", class_id=class_id))
+    return page("Import students", """
+    <div class="card" style="max-width:720px;margin:auto"><h1>Import students into {{group.name}}</h1>
+    <p>Upload an Excel workbook (.xlsx) or CSV file. Use the first worksheet and include these column headings in the first row:</p>
+    <p><code>name</code> and <code>email</code></p>
+    <p>Example:</p><div style="overflow-x:auto"><table><tr><th>name</th><th>email</th></tr><tr><td>Jane Doe</td><td>jane@example.com</td></tr><tr><td>John Smith</td><td>john@example.com</td></tr></table></div>
+    <p>Each new student receives an automatically generated temporary password. Existing email addresses will not create duplicate accounts.</p>
+    <form method="post" enctype="multipart/form-data"><label>Select Excel or CSV file</label><input type="file" name="file" accept=".xlsx,.csv" required><button class="btn">Upload and import students</button></form>
+    <p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
+    """, group=group)
 
 @app.route("/teacher")
 @login_required
