@@ -160,6 +160,19 @@ def courses():
  cs=Course.query.order_by(Course.title).all()
  return page("Courses",'''<h1>Course catalogue</h1><div class="grid">{% for c in cs %}<article class="card"><img class="course-image" src="{{ image_for_course(c.title) }}" alt="Illustration for {{c.title}}" loading="lazy"><p class="muted">{{c.category}} · {{c.level}}</p><h2>{{c.title}}</h2><p>{{c.description}}</p><a class="btn" href="/course/{{c.id}}">View course</a></article>{% else %}<p>No courses published yet.</p>{% endfor %}</div>''',cs=cs,image_for_course=course_image_url)
 
+@app.route("/enrol/<int:cid>", methods=["POST"])
+@login_required
+def enrol(cid):
+    c = Course.query.get_or_404(cid)
+    if c in current_user.courses:
+        flash("You are already enrolled in this course.")
+    else:
+        current_user.courses.append(c)
+        db.session.commit()
+        flash("You have successfully enrolled in " + c.title + ".")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/course/<int:cid>")
 def course(cid):
  c=Course.query.get_or_404(cid)
