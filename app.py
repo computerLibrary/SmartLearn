@@ -54,10 +54,10 @@ nav a{color:white;text-decoration:none}.brand{font-size:23px;font-weight:bold;ma
 main{max-width:1100px;margin:38px auto;padding:0 20px}.hero{background:linear-gradient(120deg,#0f766e,#164e63);color:white;padding:42px;border-radius:18px}
 h1{font-size:34px;margin-top:0}.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
 .card{background:white;padding:22px;border-radius:14px;box-shadow:0 4px 18px #102a4310}.btn{display:inline-block;background:#0f766e;color:white;padding:11px 17px;border:0;border-radius:8px;text-decoration:none;cursor:pointer}
-input{width:100%;padding:12px;margin:7px 0 16px;border:1px solid #cbd5e1;border-radius:8px}label{font-weight:bold}
+input{width:100%;padding:12px;margin:7px 0 16px;border:1px solid #cbd5e1;border-radius:8px}label{font-weight:bold}textarea{font:inherit}
 .notice{padding:12px;background:#dcfce7;border-radius:8px;margin:12px 0}footer{text-align:center;color:#64748b;padding:35px}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
-{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a><a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
+{% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day</footer></body></html>"""
 def page(title,body,**ctx): return render_template_string(BASE,title=title,body=render_template_string(body,**ctx),**ctx)
 
@@ -96,6 +96,106 @@ def login():
   if u and u.check_password(request.form.get("password","")): login_user(u); return redirect(url_for("dashboard"))
   flash("Email or password is incorrect.")
  return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email</label><input name="email" type="email" required><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
+
+
+def admin_required():
+    if not current_user.is_authenticated:
+        return redirect(url_for("login"))
+    admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+    if not admin_email or current_user.email.lower() != admin_email:
+        abort(403)
+    return None
+
+@app.context_processor
+def inject_admin_status():
+    admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+    return {"is_smartlearn_admin": bool(current_user.is_authenticated and admin_email and current_user.email.lower() == admin_email)}
+
+@app.route("/admin")
+@login_required
+def admin_dashboard():
+    denied = admin_required()
+    if denied: return denied
+    return page("Admin dashboard", """
+    <h1>SmartLearn administration</h1>
+    <p class="muted">Manage courses, lessons and registered learners.</p>
+    <div class="grid">
+      <article class="card"><h2>{{course_count}}</h2><p>Courses</p></article>
+      <article class="card"><h2>{{lesson_count}}</h2><p>Lessons</p></article>
+      <article class="card"><h2>{{student_count}}</h2><p>Registered learners</p></article>
+    </div>
+    <p><a class="btn" href="/admin/course/new">Add a course</a></p>
+    <h2>Courses</h2>
+    {% for c in courses %}<article class="card" style="margin:12px 0">
+      <h3>{{c.title}}</h3><p>{{c.category}} · {{c.level}} · {{c.lessons|length}} lessons · {{c.students|length}} enrolled</p>
+      <a href="/course/{{c.id}}">View course</a> · <a href="/admin/course/{{c.id}}/lesson/new">Add lesson</a>
+      <form method="post" action="/admin/course/{{c.id}}/delete" onsubmit="return confirm('Delete this course and its lessons?')"><button class="btn" style="background:#b91c1c;margin-top:10px">Delete course</button></form>
+    </article>{% else %}<p>No courses yet.</p>{% endfor %}
+    <h2>Registered learners</h2><div class="card"><ul>{% for u in users %}<li>{{u.name}} — {{u.email}} — {{u.courses|length}} enrolled</li>{% else %}<li>No learners registered.</li>{% endfor %}</ul></div>
+    """, course_count=Course.query.count(), lesson_count=Lesson.query.count(),
+       student_count=User.query.count(), courses=Course.query.order_by(Course.title).all(),
+       users=User.query.order_by(User.name).all())
+
+@app.route("/admin/course/new", methods=["GET", "POST"])
+@login_required
+def admin_new_course():
+    denied = admin_required()
+    if denied: return denied
+    if request.method == "POST":
+        title=request.form.get("title","").strip()
+        category=request.form.get("category","ICT").strip() or "ICT"
+        level=request.form.get("level","Beginner").strip() or "Beginner"
+        description=request.form.get("description","").strip()
+        if not title:
+            flash("Course title is required.")
+        else:
+            db.session.add(Course(title=title,category=category,level=level,description=description))
+            db.session.commit()
+            flash("Course created successfully.")
+            return redirect(url_for("admin_dashboard"))
+    return page("Add course", """
+    <div class="card" style="max-width:650px;margin:auto"><h1>Add a course</h1>
+    <form method="post"><label>Course title</label><input name="title" required maxlength="160">
+    <label>Category</label><input name="category" placeholder="ICT, Programming, Web Design">
+    <label>Level</label><input name="level" placeholder="Beginner, Intermediate, Advanced">
+    <label>Description</label><textarea name="description" rows="5" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px"></textarea>
+    <button class="btn">Save course</button> <a href="/admin">Cancel</a></form></div>
+    """)
+
+@app.route("/admin/course/<int:cid>/lesson/new", methods=["GET", "POST"])
+@login_required
+def admin_new_lesson(cid):
+    denied = admin_required()
+    if denied: return denied
+    c=Course.query.get_or_404(cid)
+    if request.method == "POST":
+        title=request.form.get("title","").strip()
+        content=request.form.get("content","").strip()
+        if not title:
+            flash("Lesson title is required.")
+        else:
+            next_position=(db.session.query(db.func.max(Lesson.position)).filter_by(course_id=c.id).scalar() or 0)+1
+            db.session.add(Lesson(course_id=c.id,title=title,content=content,position=next_position))
+            db.session.commit()
+            flash("Lesson added successfully.")
+            return redirect(url_for("admin_dashboard"))
+    return page("Add lesson", """
+    <div class="card" style="max-width:720px;margin:auto"><h1>Add lesson</h1><p>Course: {{c.title}}</p>
+    <form method="post"><label>Lesson title</label><input name="title" required maxlength="160">
+    <label>Lesson content</label><textarea name="content" rows="12" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px" placeholder="Write the lesson notes here..." required></textarea>
+    <button class="btn">Save lesson</button> <a href="/admin">Cancel</a></form></div>
+    """, c=c)
+
+@app.route("/admin/course/<int:cid>/delete", methods=["POST"])
+@login_required
+def admin_delete_course(cid):
+    denied = admin_required()
+    if denied: return denied
+    c=Course.query.get_or_404(cid)
+    db.session.delete(c)
+    db.session.commit()
+    flash("Course and its lessons deleted.")
+    return redirect(url_for("admin_dashboard"))
 
 @app.route("/logout")
 @login_required
