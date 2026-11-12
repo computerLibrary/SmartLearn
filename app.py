@@ -255,10 +255,12 @@ def register():
 @app.route("/login",methods=["GET","POST"])
 def login():
  if request.method=="POST":
-  u=User.query.filter_by(email=request.form.get("email","").strip().lower()).first()
+  login_value=request.form.get("login","").strip().lower()
+  if not "@" in login_value: login_value=login_value+"@student.smartlearn.local"
+  u=User.query.filter_by(email=login_value).first()
   if u and u.check_password(request.form.get("password","")): login_user(u); return redirect(url_for("dashboard"))
-  flash("Email or password is incorrect.")
- return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email</label><input name="email" type="email" required><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
+  flash("Student ID/email or password is incorrect.")
+ return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address or Student Login ID</label><input name="login" required placeholder="Enter email or e.g. SL-A1B2C3D4"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
 
 
 def admin_required():
@@ -577,6 +579,15 @@ def admin_manage_class(class_id):
     """, group=group, students=sorted(group.students, key=lambda u:u.name.lower()), available_students=available_students, available_teachers=available_teachers)
 
 
+
+def generate_student_login_id():
+    while True:
+        code = "SL-" + secrets.token_hex(4).upper()
+        internal_email = code.lower() + "@student.smartlearn.local"
+        if not User.query.filter_by(email=internal_email).first():
+            return code, internal_email
+
+
 @app.route("/admin/class/<int:class_id>/students/new", methods=["GET", "POST"])
 @login_required
 def admin_create_class_student(class_id):
@@ -585,29 +596,25 @@ def admin_create_class_student(class_id):
     group = ClassGroup.query.get_or_404(class_id)
     if request.method == "POST":
         name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "").strip() or secrets.token_urlsafe(9)
-        if not name or not email or len(password) < 8:
-            flash("Enter a name, valid email and password of at least 8 characters.")
+        if not name or len(password) < 8:
+            flash("Enter the student's name and a password of at least 8 characters, or leave the password blank to generate one.")
             return redirect(url_for("admin_create_class_student", class_id=class_id))
-        if User.query.filter_by(email=email).first():
-            flash("That email is already registered. Use Add an existing student instead.")
-            return redirect(url_for("admin_create_class_student", class_id=class_id))
-        student = User(name=name, email=email)
+        student_code, internal_email = generate_student_login_id()
+        student = User(name=name, email=internal_email)
         student.set_password(password)
         group.students.append(student)
         db.session.add(student)
         db.session.commit()
         return page("Student account created", """
         <div class="card"><h1>Student account created</h1><p>{{student.name}} has been registered and added to {{group.name}}.</p>
-        <p><strong>Email:</strong> {{student.email}}</p><p><strong>Temporary password:</strong> <code>{{password}}</code></p>
-        <p>Copy this password and share it privately with the student. It will not be shown again.</p>
+        <p><strong>Student login ID:</strong> <code>{{student_code}}</code></p><p><strong>Temporary password:</strong> <code>{{password}}</code></p>
+        <p>Give the student this ID and password. They can sign in without an email address. Save these details now; the password will not be shown again.</p>
         <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
-        """, student=student, group=group, password=password)
+        """, student=student, group=group, password=password, student_code=student_code)
     return page("Register student", """
-    <div class="card" style="max-width:620px;margin:auto"><h1>Register a new student</h1><p class="muted">This creates a SmartLearn account and automatically adds the student to {{group.name}}.</p>
+    <div class="card" style="max-width:620px;margin:auto"><h1>Register a new student</h1><p class="muted">No email address is required. SmartLearn generates a student login ID automatically and adds the student to {{group.name}}.</p>
     <form method="post"><label>Student full name</label><input name="name" required maxlength="100">
-    <label>Email address (used to sign in)</label><input name="email" type="email" required maxlength="150">
     <label>Password (leave blank to generate a temporary password)</label><input name="password" type="text" minlength="8">
     <button class="btn">Create student account</button></form><p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
     """, group=group)
@@ -640,43 +647,44 @@ def admin_import_class_students(class_id):
             headers = [str(v or "").strip().lower().replace(" ", "_") for v in rows[0]]
             name_idx = next((headers.index(k) for k in ("name", "full_name", "student_name") if k in headers), None)
             email_idx = next((headers.index(k) for k in ("email", "email_address") if k in headers), None)
-            if name_idx is None or email_idx is None:
-                raise ValueError("The first row must contain name and email column headings.")
-            created, skipped, credentials = 0, 0, []
+            if name_idx is None:
+                raise ValueError("The first row must contain a name column heading (name or full_name).")
+            created, linked, skipped, credentials = 0, 0, 0, []
             for row in rows[1:]:
-                if not row or max(name_idx, email_idx) >= len(row): continue
+                if not row or name_idx >= len(row): continue
                 name = str(row[name_idx] or "").strip()
-                email = str(row[email_idx] or "").strip().lower()
-                if not name or not email: continue
-                existing = User.query.filter_by(email=email).first()
+                email = str(row[email_idx] or "").strip().lower() if email_idx is not None and email_idx < len(row) else ""
+                if not name: continue
+                existing = User.query.filter_by(email=email).first() if email else None
                 if existing:
-                    skipped += 1
-                    if existing not in group.students: group.students.append(existing)
+                    if existing not in group.students:
+                        group.students.append(existing); linked += 1
+                    else: skipped += 1
                     continue
+                student_code, internal_email = generate_student_login_id()
                 password = secrets.token_urlsafe(9)
-                student = User(name=name[:100], email=email[:150])
+                student = User(name=name[:100], email=email[:150] if email else internal_email)
                 student.set_password(password)
                 group.students.append(student)
                 db.session.add(student)
-                credentials.append({"name": name, "email": email, "password": password})
+                credentials.append({"name": name, "login_id": student_code if not email else email, "password": password})
                 created += 1
             db.session.commit()
             return page("Student import results", """
-            <div class="card"><h1>Import complete</h1><p><strong>{{created}}</strong> new accounts created and added to {{group.name}}.</p><p>{{skipped}} existing email address(es) were skipped as new accounts; existing users were added to this class if needed.</p>
-            {% if credentials %}<h2>New student login details</h2><p>Copy or save these temporary passwords now. They will not be displayed again.</p>
-            <div style="overflow-x:auto"><table><thead><tr><th>Student</th><th>Email</th><th>Temporary password</th></tr></thead><tbody>{% for c in credentials %}<tr><td>{{c.name}}</td><td>{{c.email}}</td><td><code>{{c.password}}</code></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+            <div class="card"><h1>Import complete</h1><p><strong>{{created}}</strong> new student accounts created. {{linked}} existing accounts added to this class; {{skipped}} already-existing class entries skipped.</p>
+            {% if credentials %}<h2>Student login details</h2><p>Save these details now and share them privately with each student.</p>
+            <div style="overflow-x:auto"><table><thead><tr><th>Student</th><th>Login ID / Email</th><th>Temporary password</th></tr></thead><tbody>{% for c in credentials %}<tr><td>{{c.name}}</td><td><code>{{c.login_id}}</code></td><td><code>{{c.password}}</code></td></tr>{% endfor %}</tbody></table></div>{% endif %}
             <a class="btn" href="/admin/class/{{group.id}}">Back to class register</a></div>
-            """, created=created, skipped=skipped, credentials=credentials, group=group)
+            """, created=created, linked=linked, skipped=skipped, credentials=credentials, group=group)
         except Exception as exc:
             db.session.rollback()
             flash("Import failed: " + str(exc))
             return redirect(url_for("admin_import_class_students", class_id=class_id))
     return page("Import students", """
     <div class="card" style="max-width:720px;margin:auto"><h1>Import students into {{group.name}}</h1>
-    <p>Upload an Excel workbook (.xlsx) or CSV file. Use the first worksheet and include these column headings in the first row:</p>
-    <p><code>name</code> and <code>email</code></p>
-    <p>Example:</p><div style="overflow-x:auto"><table><tr><th>name</th><th>email</th></tr><tr><td>Jane Doe</td><td>jane@example.com</td></tr><tr><td>John Smith</td><td>john@example.com</td></tr></table></div>
-    <p>Each new student receives an automatically generated temporary password. Existing email addresses will not create duplicate accounts.</p>
+    <p>Upload an Excel (.xlsx) or CSV file. The first worksheet must contain a <code>name</code> column. An <code>email</code> column is optional.</p>
+    <p>Example:</p><div style="overflow-x:auto"><table><tr><th>name</th></tr><tr><td>Jane Doe</td></tr><tr><td>John Smith</td></tr></table></div>
+    <p>For students without email, SmartLearn generates a login ID and temporary password. If you include email, it can be used as their login.</p>
     <form method="post" enctype="multipart/form-data"><label>Select Excel or CSV file</label><input type="file" name="file" accept=".xlsx,.csv" required><button class="btn">Upload and import students</button></form>
     <p><a href="/admin/class/{{group.id}}">Cancel</a></p></div>
     """, group=group)
