@@ -124,7 +124,7 @@ def course_image_url(title):
         (("html", "web development"), "photo-1498050108023-c5249f4df085"),
         (("css",), "photo-1467232004584-a241de8bcf5d"),
         (("database design", "database queries"), "photo-1544383835-bda2bc66a55d"),
-        (("google docs",), "photo-1455390582262-044c"),
+        (("google docs",), "photo-1455390582262-044cdead277a"),
         (("google sheets",), "photo-1551288049-bebda4e38f71"),
         (("machine learning",), "photo-1555255707-c07966088b7b"),
         (("web database connectivity",), "photo-1519389950473-47ba0277781c"),
