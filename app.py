@@ -62,6 +62,47 @@ input{width:100%;padding:12px;margin:7px 0 16px;border:1px solid #cbd5e1;border-
 .visual-card img{display:block;width:100%;height:155px;object-fit:cover}
 .visual-card div{padding:16px}.visual-card h3{margin:0 0 8px}.visual-card p{margin:0;color:#64748b;line-height:1.5}
 @media(max-width:600px){.home-hero{min-height:300px;padding:28px}}
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+:root{--sl-ink:#172b4d;--sl-muted:#64748b;--sl-primary:#173b67;--sl-primary-dark:#102b4c;--sl-accent:#16a36a;--sl-accent-dark:#128457;--sl-bg:#f3f6fa;--sl-border:#e2e8f0;--sl-card:#fff}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',Arial,sans-serif;background:var(--sl-bg);color:var(--sl-ink);line-height:1.65;-webkit-font-smoothing:antialiased}
+nav{position:sticky;top:0;z-index:20;background:rgba(16,43,76,.97);backdrop-filter:blur(12px);padding:14px max(5%,calc((100% - 1160px)/2));gap:24px;box-shadow:0 5px 22px rgba(15,35,60,.12)}
+nav a{font-weight:600;opacity:.92;transition:opacity .2s,color .2s}
+nav a:hover{opacity:1;color:#9be7c3}
+.brand{font-family:'Manrope',sans-serif;font-size:25px;letter-spacing:-.8px;font-weight:800}
+main{max-width:1160px;margin:42px auto 54px;padding:0 24px;min-height:55vh}
+h1,h2,h3,h4{font-family:'Manrope','DM Sans',sans-serif;color:var(--sl-ink);line-height:1.22;letter-spacing:-.45px}
+h1{font-size:clamp(29px,4vw,40px);font-weight:800;margin-bottom:18px}
+h2{font-size:25px;font-weight:750;margin:32px 0 16px}
+h3{font-size:19px;font-weight:700}
+p{line-height:1.7}
+a{color:#176b9a;text-decoration:none;font-weight:600}
+a:hover{color:var(--sl-accent-dark);text-decoration:underline}
+.hero{background:linear-gradient(125deg,#173b67 0%,#087f70 100%);border-radius:22px;padding:clamp(30px,5vw,58px);box-shadow:0 16px 36px rgba(23,59,103,.17)}
+.home-hero{min-height:390px;border-radius:22px;background-image:linear-gradient(90deg,rgba(12,34,61,.94),rgba(12,70,75,.55)),url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1800&q=85")}
+.home-hero h1{color:#fff;max-width:650px;font-size:clamp(34px,5vw,52px)}
+.home-hero p{color:rgba(255,255,255,.9)}
+.grid{gap:22px}
+.card,.visual-card{background:var(--sl-card);border:1px solid var(--sl-border);border-radius:17px;box-shadow:0 5px 18px rgba(16,43,76,.055);transition:transform .2s ease,box-shadow .2s ease}
+.card{padding:25px}
+.card:hover,.visual-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(16,43,76,.10)}
+.visual-grid{gap:22px;margin:26px 0 42px}
+.visual-card{overflow:hidden}
+.visual-card img{height:175px}
+.visual-card div{padding:20px}
+.visual-card p,.muted{color:var(--sl-muted)}
+.btn,button.btn{background:var(--sl-accent);color:#fff;padding:12px 20px;border:0;border-radius:10px;font:700 15px 'DM Sans',sans-serif;box-shadow:0 4px 10px rgba(22,163,106,.16);transition:background .2s,transform .2s,box-shadow .2s}
+.btn:hover,button.btn:hover{background:var(--sl-accent-dark);color:#fff;text-decoration:none;transform:translateY(-1px);box-shadow:0 7px 16px rgba(22,163,106,.22)}
+input,select,textarea{width:100%;padding:13px 14px;margin:7px 0 18px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:var(--sl-ink);font:15px 'DM Sans',sans-serif;outline:none;transition:border-color .2s,box-shadow .2s}
+input:focus,select:focus,textarea:focus{border-color:#279b75;box-shadow:0 0 0 3px rgba(22,163,106,.12)}
+label{display:block;font-weight:700;color:#334155;margin-top:5px}
+textarea{line-height:1.65}
+.notice{padding:14px 17px;background:#e7f7ef;border:1px solid #b9e8d0;color:#176344;border-radius:11px;margin:14px 0}
+footer{border-top:1px solid var(--sl-border);background:#fff;text-align:center;color:var(--sl-muted);padding:30px 20px;margin-top:54px;font-size:14px}
+article.card h2:first-child,article.card h3:first-child{margin-top:0}
+@media(max-width:700px){nav{gap:13px;padding:13px 18px}nav a{font-size:14px}.brand{font-size:22px}main{margin:26px auto 38px;padding:0 16px}.home-hero{min-height:330px;padding:28px 22px}.card{padding:20px}.visual-card img{height:155px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
 {% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
 <main>{% with messages=get_flashed_messages() %}{% for m in messages %}<div class="notice">{{m}}</div>{% endfor %}{% endwith %}{{body|safe}}</main><footer>SmartLearn · Learn something new every day<br><span style="font-size:14px">Developed by <strong>Isaac NKURUNZIZA</strong></span></footer></body></html>"""
