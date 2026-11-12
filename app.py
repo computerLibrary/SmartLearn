@@ -1,20 +1,9 @@
 import os
-import base64
 from datetime import datetime
 from flask import Flask, request, redirect, url_for, flash, render_template_string, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-
-# Restore the compressed founder portrait into Flask's static directory at startup.
-_founder_asset_dir = os.path.join(os.path.dirname(__file__), "static")
-_founder_b64_path = os.path.join(_founder_asset_dir, "founder.jpg.b64")
-_founder_image_path = os.path.join(_founder_asset_dir, "founder.jpg")
-if os.path.isfile(_founder_b64_path):
-    os.makedirs(_founder_asset_dir, exist_ok=True)
-    with open(_founder_b64_path, "r", encoding="ascii") as _asset_file:
-        with open(_founder_image_path, "wb") as _image_file:
-            _image_file.write(base64.b64decode(_asset_file.read()))
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-this-secret-before-production")
@@ -72,10 +61,6 @@ input{width:100%;padding:12px;margin:7px 0 16px;border:1px solid #cbd5e1;border-
 .visual-card{background:white;border-radius:14px;overflow:hidden;box-shadow:0 4px 18px #102a4310}
 .visual-card img{display:block;width:100%;height:155px;object-fit:cover}
 .visual-card div{padding:16px}.visual-card h3{margin:0 0 8px}.visual-card p{margin:0;color:#64748b;line-height:1.5}
-.founder-section{display:grid;grid-template-columns:minmax(220px,320px) 1fr;gap:28px;align-items:center;background:#fff;padding:24px;border-radius:16px;box-shadow:0 4px 18px #102a4310;margin:30px 0}
-.founder-photo{width:100%;max-width:320px;aspect-ratio:1/1;object-fit:cover;object-position:center;border-radius:14px;display:block}
-.founder-section h2{margin:6px 0;color:#102a43}.founder-role{color:#0f766e;font-weight:bold;margin:0 0 12px}
-@media(max-width:600px){.founder-section{grid-template-columns:1fr}.founder-photo{max-width:100%}}
 @media(max-width:600px){.home-hero{min-height:300px;padding:28px}}
 </style></head><body><nav><a class="brand" href="/">SmartLearn</a><a href="/courses">Courses</a>
 {% if current_user.is_authenticated %}<a href="/dashboard">My learning</a>{% if is_smartlearn_admin %}<a href="/admin">Admin</a>{% endif %}<a href="/logout">Sign out</a>{% else %}<a href="/login">Sign in</a><a href="/register">Create account</a>{% endif %}</nav>
@@ -87,7 +72,6 @@ def home():
  cs=Course.query.order_by(Course.id).limit(6).all()
  return page("Home","""
  <section class="hero home-hero"><div><p style="text-transform:uppercase;letter-spacing:2px;font-weight:bold">Welcome to SmartLearn</p><h1>Learn today. Build tomorrow.</h1><p style="max-width:600px;line-height:1.7">Develop practical digital skills in computing, programming, web design, databases and emerging technologies.</p><a class="btn" href="/courses">Explore courses</a></div></section>
- <section class="founder-section"><img class="founder-photo" src="/static/founder.jpg" alt="Isaac NKURUNZIZA, Founder and Owner of SmartLearn" loading="lazy"><div><p style="text-transform:uppercase;letter-spacing:2px;color:#0f766e;font-weight:bold">Meet the founder</p><h2>Isaac NKURUNZIZA</h2><p class="founder-role">Founder &amp; Owner of SmartLearn</p><p style="line-height:1.7;color:#475569">SmartLearn was created to make digital knowledge and practical technology skills more accessible. Our goal is to help learners build confidence, develop useful skills and prepare for tomorrow's opportunities.</p></div></section>
  <h2>Explore learning areas</h2>
  <div class="visual-grid">
   <article class="visual-card"><img src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80" alt="Learner working on a laptop" loading="lazy"><div><h3>Digital skills</h3><p>Build confidence using essential digital tools and technology.</p></div></article>
