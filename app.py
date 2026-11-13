@@ -200,9 +200,24 @@ def login():
   login_value=request.form.get("login","").strip().lower()
   if not "@" in login_value: login_value=login_value+"@student.smartlearn.local"
   u=User.query.filter_by(email=login_value).first()
-  if u and u.check_password(request.form.get("password","")): login_user(u); return redirect(url_for("dashboard"))
-  flash("Student ID/email or password is incorrect.")
- return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address</label><input name="login" type="email" required placeholder="Enter your email address"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form></div>''')
+  admin_email=os.getenv("ADMIN_EMAIL","").strip().lower()
+  if u and u.check_password(request.form.get("password","")) and u.email.lower()!=admin_email:
+   login_user(u); return redirect(url_for("dashboard"))
+  flash("Standard account email or password is incorrect. Administrators should use Admin Sign In.")
+ return page("Sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Welcome back</h1><form method="post"><label>Email address</label><input name="login" type="email" required placeholder="Enter your email address"><label>Password</label><input name="password" type="password" required><button class="btn">Sign in</button></form><p style="margin-top:20px">Administrator? <a href="/admin-login">Admin Sign In</a></p></div>''')
+
+@app.route("/admin-login",methods=["GET","POST"])
+def admin_login():
+ if request.method=="POST":
+  email=request.form.get("email","").strip().lower()
+  password=request.form.get("password","")
+  admin_email=os.getenv("ADMIN_EMAIL","").strip().lower()
+  u=User.query.filter_by(email=email).first() if admin_email and email==admin_email else None
+  if u and u.check_password(password):
+   login_user(u)
+   return redirect(url_for("admin_dashboard"))
+  flash("Administrator email or password is incorrect, or admin login has not been configured.")
+ return page("Administrator sign in",'''<div class="card" style="max-width:520px;margin:auto"><h1>Administrator Login</h1><p class="muted">This area is only for the SmartLearn administrator.</p><form method="post"><label>Administrator email</label><input name="email" type="email" required placeholder="Enter administrator email"><label>Password</label><input name="password" type="password" required><button class="btn">Admin Sign In</button></form><p style="margin-top:20px"><a href="/login">Back to standard account login</a></p></div>''')
 
 @app.route("/logout", methods=["GET", "POST"])
 @login_required
@@ -214,7 +229,7 @@ def logout():
 
 def admin_required():
     if not current_user.is_authenticated:
-        return redirect(url_for("login"))
+        return redirect(url_for("admin_login"))
     admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
     if not admin_email or current_user.email.lower() != admin_email:
         abort(403)
