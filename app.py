@@ -678,7 +678,10 @@ with app.app_context():
     # curriculum_units. Only rename when exactly one numbered legacy course
     # exists and the destination title is not already in use. This preserves
     # the course ID, lessons, enrolments and enrollment key.
-    for unit_number, (course_title, category, description, unit_lessons) in enumerate(curriculum_units, start=1):
+    unit_numbers = {}
+    for course_title, category, description, unit_lessons in curriculum_units:
+        unit_numbers[category] = unit_numbers.get(category, 0) + 1
+        unit_number = unit_numbers[category]
         if category in ("S4 ICT", "S5 ICT"):
             legacy_courses = Course.query.filter(
                 Course.title.like(f"{category} - Unit {unit_number}:%")
