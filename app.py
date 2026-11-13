@@ -247,7 +247,7 @@ def admin_dashboard():
     denied = admin_required()
     if denied: return denied
     return page("Admin dashboard", """
-    <h1>SmartLearn administration</h1>
+    <h1>Welcome to SmartLearn admin Page</h1>
     <p class="muted">Manage courses, lessons and registered learners.</p>
     <div class="grid">
       <article class="card"><h2>{{course_count}}</h2><p>Courses</p></article>
