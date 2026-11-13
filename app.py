@@ -674,8 +674,30 @@ curriculum_units = [
 ]
 
 with app.app_context():
-    for course_title, category, description, course_level, in []:
-        pass
+    # Safely rename existing numbered S4/S5 curriculum courses to match
+    # curriculum_units. Only rename when exactly one numbered legacy course
+    # exists and the destination title is not already in use. This preserves
+    # the course ID, lessons, enrolments and enrollment key.
+    for unit_number, (course_title, category, description, unit_lessons) in enumerate(curriculum_units, start=1):
+        if category in ("S4 ICT", "S5 ICT"):
+            legacy_courses = Course.query.filter(
+                Course.title.like(f"{category} - Unit {unit_number}:%")
+            ).all()
+            destination_course = Course.query.filter_by(title=course_title).first()
+            if len(legacy_courses) == 1 and destination_course is None:
+                legacy_courses[0].title = course_title
+                db.session.commit()
+            elif len(legacy_courses) > 1:
+                app.logger.warning(
+                    "Skipped automatic rename for %s: multiple legacy courses matched unit %s",
+                    category, unit_number
+                )
+            elif legacy_courses and destination_course is not None:
+                app.logger.warning(
+                    "Skipped automatic rename for %s: destination title '%s' already exists",
+                    legacy_courses[0].title, course_title
+                )
+
     for course_title, category, description, unit_lessons in curriculum_units:
         course_record = Course.query.filter_by(title=course_title).first()
         if course_record is None:
